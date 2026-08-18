@@ -210,6 +210,12 @@ export function buildCourt(scene) {
   makeLine(COURT.depth - 0.36, -COURT.halfWidth, -(COURT.depth + 0.36) / 2, Math.PI / 2);
   makeLine(COURT.depth - 0.36, COURT.halfWidth, -(COURT.depth + 0.36) / 2, Math.PI / 2);
 
+  // Mirror the same markings onto Team B's grass side beyond the hedge.
+  makeLine(COURT.width, 0, COURT.serveLineZ);
+  makeLine(COURT.width, 0, 0.36);
+  makeLine(COURT.depth - 0.36, -COURT.halfWidth, (COURT.depth + 0.36) / 2, Math.PI / 2);
+  makeLine(COURT.depth - 0.36, COURT.halfWidth, (COURT.depth + 0.36) / 2, Math.PI / 2);
+
   // Hedge "net" across the middle.
   const hedgeGroup = new THREE.Group();
   const hedgeMat = new THREE.MeshLambertMaterial({ map: hedgeTex });

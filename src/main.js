@@ -113,18 +113,31 @@ function pickHumanTarget(player) {
   const spread = 4.2;
   const x = THREE.MathUtils.clamp(player.group.position.x + move.x * spread, -COURT.halfWidth + 0.4, COURT.halfWidth - 0.4);
   let depth;
-  if (move.z < 0) depth = COURT.depth - 1.2; // Up: deep shot
-  else if (move.z > 0) depth = 1.3; // Down: short dink
+  if (move.z > 0) depth = COURT.depth - 1.2; // Up: deep shot
+  else if (move.z < 0) depth = 1.3; // Down: short dink
   else depth = 4.4;
   const z = targetSideSign * depth;
   return new THREE.Vector3(x, 0, z);
 }
 
+function pickPassTarget(player) {
+  // A soft set to a teammate, entirely on our own side — no hedge to clear.
+  const teammates = teamA.filter((p) => p !== player);
+  const mate = teammates[Math.floor(Math.random() * teammates.length)] || player;
+  const x = THREE.MathUtils.clamp(mate.homeSlot.x + (Math.random() - 0.5) * 1.5, -COURT.halfWidth + 0.5, COURT.halfWidth - 0.5);
+  const z = -(1.8 + Math.random() * 3.2);
+  return new THREE.Vector3(x, 0, z);
+}
+
 function humanHit(player, isServe) {
   const start = new THREE.Vector3(player.group.position.x, Math.max(ball.position.y, 0.2), player.group.position.z);
-  const target = pickHumanTarget(player);
-  const apex = isServe ? 1.1 : 0.6 + Math.random() * 0.9;
-  const v = computeLaunchVelocity(start, target, COURT.hedge.height + apex);
+  // The rules require passing to a teammate at least once before sending the
+  // ball back over the hedge, so the first touch of a possession is a set.
+  const mustPassFirst = !isServe && (match.touchCount || 0) === 0;
+  const target = mustPassFirst ? pickPassTarget(player) : pickHumanTarget(player);
+  const apex = mustPassFirst ? 1.3 + Math.random() * 0.8
+    : COURT.hedge.height + (isServe ? 1.1 : 0.6 + Math.random() * 0.9);
+  const v = computeLaunchVelocity(start, target, apex);
   ball.velocity.copy(v);
   ball.position.y = Math.max(ball.position.y, 0.25);
   player.triggerKick();
@@ -180,9 +193,13 @@ function handleHumanInput(dt) {
     const dz = ball.position.z - player.group.position.z;
     const dist = Math.hypot(dx, dz);
     const canTouch = canPlayerTouch('A');
-    HUD.setActiveHint(canTouch && dist < REACH + 0.5 ? 'Spatie: speel de bal' : '');
+    const willPass = (match.touchCount || 0) === 0;
+    HUD.setActiveHint(canTouch && dist < REACH + 0.5
+      ? (willPass ? 'Spatie: overspelen naar teamgenoot' : 'Spatie: speel de bal over de heg')
+      : '');
     if (spacePressed && canTouch && dist < REACH && ball.position.y < MAX_HIT_HEIGHT) {
       humanHit(player, false);
+      match.recordTouch('A');
     }
   } else {
     HUD.setActiveHint('');
@@ -254,5 +271,9 @@ document.getElementById('startBtn').addEventListener('click', () => {
 
 HUD.hideLoading();
 HUD.showOverlay();
+
+if (window.__HEGBAL_DEBUG__) {
+  window.__debug = { ball, match, teamA, teamB, get humanIndex() { return humanIndex; } };
+}
 
 animate();

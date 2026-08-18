@@ -12,6 +12,20 @@ function clampToCourt(x, z) {
   };
 }
 
+function pickPassTarget(hitterTeam, team, player) {
+  // A soft set to a teammate, entirely on our own side of the hedge — no
+  // need to clear anything, just keep it alive for the follow-up attack.
+  const teammates = team.filter((p) => p !== player);
+  const mate = teammates[Math.floor(Math.random() * teammates.length)] || player;
+  const sideSign = hitterTeam === 'A' ? -1 : 1;
+  const x = THREE.MathUtils.clamp(
+    mate.homeSlot.x + (Math.random() - 0.5) * 1.5,
+    -COURT.halfWidth + 0.5, COURT.halfWidth - 0.5
+  );
+  const z = sideSign * (1.8 + Math.random() * 3.2);
+  return new THREE.Vector3(x, 0, z);
+}
+
 function pickTarget(hitterTeam, opponents) {
   // Aim at whichever half of the opponent's court has the least defensive coverage.
   const targetSideSign = hitterTeam === 'A' ? 1 : -1;
@@ -103,7 +117,8 @@ function updateTeamAI(dt, team, opponents, ball, match, teamId, onHit) {
       const distToBall = Math.hypot(dx, dz);
       if (distToBall < REACH && ball.position.y < MAX_HIT_HEIGHT && ball.velocity.y <= 6) {
         if (serving) match.serveStruck = true;
-        hit(player, ball, opponents, teamId, serving, onHit);
+        hit(player, ball, team, opponents, teamId, serving, match, onHit);
+        match.recordTouch(teamId);
       }
     }
 
@@ -111,17 +126,32 @@ function updateTeamAI(dt, team, opponents, ball, match, teamId, onHit) {
   }
 }
 
-function hit(player, ball, opponents, teamId, serving, onHit) {
+function hit(player, ball, team, opponents, teamId, serving, match, onHit) {
   const start = new THREE.Vector3(player.group.position.x, Math.max(ball.position.y, 0.2), player.group.position.z);
-  const target = pickTarget(teamId, opponents);
-  // Modest imprecision so the AI doesn't clear the hedge by an inhuman margin
-  // on every touch: real footvolley shots skim close and sometimes clip it.
-  target.x += (Math.random() - 0.5) * 1.0;
-  target.z += (Math.random() - 0.5) * 0.8;
-  const apex = serving ? 0.75 + Math.random() * 0.7 : 0.35 + Math.random() * 1.15;
-  const v = computeLaunchVelocity(start, target, COURT.hedge.height + apex);
-  v.x += (Math.random() - 0.5) * 0.5;
-  v.z += (Math.random() - 0.5) * 0.5;
+  // The rules require at least one pass to a teammate before sending it back
+  // over the hedge, so the first touch of a possession is always a soft set.
+  const mustPassFirst = !serving && (match.touchCount || 0) === 0 && team.length > 1;
+
+  let target, apexWorld;
+  if (mustPassFirst) {
+    target = pickPassTarget(teamId, team, player);
+    apexWorld = 1.3 + Math.random() * 0.8;
+  } else {
+    target = pickTarget(teamId, opponents);
+    // Modest imprecision so the AI doesn't clear the hedge by an inhuman
+    // margin on every touch: real footvolley shots skim close and sometimes
+    // clip it.
+    target.x += (Math.random() - 0.5) * 1.0;
+    target.z += (Math.random() - 0.5) * 0.8;
+    const apexAboveHedge = serving ? 0.75 + Math.random() * 0.7 : 0.35 + Math.random() * 1.15;
+    apexWorld = COURT.hedge.height + apexAboveHedge;
+  }
+
+  const v = computeLaunchVelocity(start, target, apexWorld);
+  if (!mustPassFirst) {
+    v.x += (Math.random() - 0.5) * 0.5;
+    v.z += (Math.random() - 0.5) * 0.5;
+  }
   ball.velocity.copy(v);
   ball.position.y = Math.max(ball.position.y, 0.25);
   player.triggerKick();
