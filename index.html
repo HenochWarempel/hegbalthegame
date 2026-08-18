@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hegbal</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23ffffff' stroke='%23222' stroke-width='6'/%3E%3C/svg%3E" />
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #7b8a70; font-family: 'Arial Narrow', Arial, sans-serif; }
+  #app { position: relative; width: 100vw; height: 100vh; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  #hud { position: absolute; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,.8); }
+
+  #scoreboard {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: stretch; background: linear-gradient(180deg,#1c3b1f,#0f230f);
+    border: 3px solid #e8e2c8; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 18px rgba(0,0,0,.5);
+    min-width: 460px;
+  }
+  .sb-team { display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 6px 18px; min-width: 140px; }
+  .sb-team.blue { background: rgba(30,80,180,.35); }
+  .sb-team.red { background: rgba(180,40,40,.35); }
+  .sb-name { font-size: 13px; letter-spacing: 2px; font-weight: 700; opacity: .85; }
+  .sb-score { font-size: 34px; font-weight: 900; line-height: 1; }
+  .sb-mid { display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 4px 14px; border-left:2px solid rgba(255,255,255,.25); border-right:2px solid rgba(255,255,255,.25); }
+  .sb-mid .games { font-size: 11px; letter-spacing:1px; opacity:.8; }
+  .sb-mid .setnum { font-size: 20px; font-weight:800; }
+  .serve-dot { width: 10px; height: 10px; border-radius: 50%; background: #ffd54a; box-shadow: 0 0 6px #ffd54a; margin-top: 4px; visibility: hidden; }
+  .serve-dot.show { visibility: visible; }
+
+  #banner {
+    position: absolute; top: 96px; left: 50%; transform: translateX(-50%);
+    font-size: 30px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase;
+    color: #ffe37a; text-shadow: 0 3px 6px rgba(0,0,0,.8);
+    opacity: 0; transition: opacity .25s ease, transform .25s ease;
+  }
+  #banner.show { opacity: 1; }
+
+  #controlsHint {
+    position: absolute; bottom: 12px; left: 12px; font-size: 12px; line-height: 1.6;
+    background: rgba(0,0,0,.35); padding: 8px 12px; border-radius: 8px; max-width: 300px;
+  }
+  #controlsHint b { color: #ffe37a; }
+
+  #activeHint {
+    position: absolute; bottom: 12px; right: 12px; font-size: 13px; line-height: 1.6;
+    background: rgba(0,0,0,.35); padding: 8px 12px; border-radius: 8px; text-align:right;
+  }
+
+  #overlay {
+    position: absolute; inset: 0; background: radial-gradient(ellipse at center, #2a4a2a 0%, #0e1f0e 100%);
+    display: flex; align-items: center; justify-content: center; flex-direction: column; color: #fff; text-align: center;
+    z-index: 20;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h1 {
+    font-size: 72px; margin: 0; letter-spacing: 8px; font-weight: 900;
+    background: linear-gradient(180deg, #fff9dd, #ffd54a 60%, #b8860b);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: 0 8px 24px rgba(0,0,0,.6);
+  }
+  #overlay .sub { font-size: 16px; letter-spacing: 4px; opacity: .8; margin-top: -6px; margin-bottom: 30px; text-transform: uppercase; }
+  #overlay button {
+    pointer-events: all; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+    padding: 14px 46px; margin: 6px; border-radius: 40px; border: 3px solid #ffe37a; color: #222;
+    background: linear-gradient(180deg,#ffe37a,#e0a92c); cursor: pointer; box-shadow: 0 6px 0 #8a5c10, 0 10px 16px rgba(0,0,0,.4);
+  }
+  #overlay button:hover { filter: brightness(1.08); }
+  #overlay button:active { transform: translateY(4px); box-shadow: 0 2px 0 #8a5c10; }
+  #overlay .rules {
+    pointer-events: all; max-width: 640px; text-align: left; font-size: 13.5px; line-height: 1.55;
+    background: rgba(0,0,0,.35); padding: 16px 22px; border-radius: 10px; margin-top: 20px; max-height: 34vh; overflow-y: auto;
+  }
+  #overlay .rules h3 { margin: 10px 0 4px; color: #ffe37a; font-size: 14px; letter-spacing: 1px; }
+  #overlay .rules ul { margin: 4px 0 0 18px; padding: 0; }
+
+  #matchOver { font-size: 22px; margin-top: 6px; color: #ffe37a; min-height: 28px; }
+  #loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; letter-spacing:3px; z-index: 30; background:#0e1f0e; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="loading">HEGBAL WORDT GELADEN&hellip;</div>
+
+  <div id="overlay" class="hidden">
+    <h1>HEGBAL</h1>
+    <div class="sub">Parkeerplaats Kampioenschap</div>
+    <div>
+      <button id="startBtn">Speel</button>
+    </div>
+    <div class="rules">
+      <h3>Opslag</h3>
+      <ul>
+        <li>Trap de bal uit op &oacute;f achter de lijn &mdash; vanaf de grond of vanuit de hand.</li>
+        <li>De bal moet direct naar de overkant.</li>
+        <li>Raakt de opslag de heg maar gaat hij toch over? Je mag hem nog &eacute;&eacute;n keer over doen.</li>
+        <li>Gebeurt dat de tweede keer ook? Punt en opslag voor de tegenpartij.</li>
+        <li>Raakt de opslag de heg en gaat hij daarna uit, of blijft hij in de heg steken? Meteen punt en opslag voor de tegenpartij.</li>
+      </ul>
+      <h3>Rally</h3>
+      <ul>
+        <li>Je moet de bal minstens &eacute;&eacute;n keer overspelen.</li>
+        <li>Per beurt mag de bal &eacute;&eacute;n keer stuiteren &mdash; ook buiten het veld.</li>
+        <li>Ligt de bal stil op de heg? Dan mag de tegenpartij niet ingrijpen.</li>
+      </ul>
+      <h3>Wedstrijd</h3>
+      <ul>
+        <li>Potjes tot 5, met minimaal twee punten verschil.</li>
+        <li>Bij een rematch mag de verliezer als eerste opslaan.</li>
+      </ul>
+    </div>
+    <div id="matchOver"></div>
+  </div>
+
+  <div id="hud">
+    <div id="scoreboard">
+      <div class="sb-team blue">
+        <div class="sb-name" id="teamAName">JOUW TEAM</div>
+        <div class="sb-score" id="teamAScore">0</div>
+        <div class="serve-dot" id="serveDotA"></div>
+      </div>
+      <div class="sb-mid">
+        <div class="games" id="setsLabel">SETS</div>
+        <div class="setnum"><span id="setsA">0</span> - <span id="setsB">0</span></div>
+      </div>
+      <div class="sb-team red">
+        <div class="sb-name" id="teamBName">TEGENSTANDER</div>
+        <div class="sb-score" id="teamBScore">0</div>
+        <div class="serve-dot" id="serveDotB"></div>
+      </div>
+    </div>
+    <div id="banner"></div>
+    <div id="controlsHint">
+      <b>Pijltjes</b> bewegen &middot; <b>Spatie</b> raak bal / opslag<br/>
+      <b>Shift+Spatie</b> opslag vanuit de hand &middot; <b>Q</b> wissel speler<br/>
+      Richt met <b>links/rechts</b> vlak voor het raken van de bal
+    </div>
+    <div id="activeHint"></div>
+  </div>
+</div>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
