@@ -58,6 +58,7 @@ function updateTeamAI(dt, team, opponents, ball, match, teamId, onHit) {
   if (aiPlayers.length === 0) return;
 
   const ballOnOurSide = teamId === 'A' ? ball.position.z < 0 : ball.position.z > 0;
+  const ballResting = ball.restingOnHedge;
   const ourTurn = (match.phase === 'rally' && match.turnTeam === teamId) ||
     (match.phase === 'serve' && match.serverTeam === teamId);
 
@@ -84,6 +85,13 @@ function updateTeamAI(dt, team, opponents, ball, match, teamId, onHit) {
     if (serving && player === server) {
       const serveZ = teamId === 'A' ? -(COURT.serveLineZ + 0.3) : (COURT.serveLineZ + 0.3);
       desired.set(0, 0, serveZ);
+    } else if (!serving && player === receiver && ballResting && ourTurn) {
+      // The ball is stuck on the hedge and it's our ball to finish sending
+      // over — beeline for the boundary right under it rather than the
+      // usual (looser) interception path.
+      const boundaryZ = teamId === 'A' ? -0.36 : 0.36;
+      const targetX = THREE.MathUtils.clamp(ball.position.x, -COURT.halfWidth + 0.5, COURT.halfWidth - 0.5);
+      desired.set(targetX, 0, boundaryZ);
     } else if (!serving && player === receiver && (ballOnOurSide || Math.abs(ball.velocity.y) > 0.1)) {
       const targetX = THREE.MathUtils.clamp(predictedX, -COURT.halfWidth + 0.5, COURT.halfWidth - 0.5);
       const homeZ = player.homeSlot.z;
@@ -118,7 +126,7 @@ function updateTeamAI(dt, team, opponents, ball, match, teamId, onHit) {
       if (distToBall < REACH && ball.position.y < MAX_HIT_HEIGHT && ball.velocity.y <= 6) {
         if (serving) match.serveStruck = true;
         hit(player, ball, team, opponents, teamId, serving, match, onHit);
-        match.recordTouch(teamId);
+        match.recordTouch(teamId, player);
       }
     }
 

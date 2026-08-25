@@ -199,19 +199,49 @@ function handleHumanInput(dt) {
       : '');
     if (spacePressed && canTouch && dist < REACH && ball.position.y < MAX_HIT_HEIGHT) {
       humanHit(player, false);
-      match.recordTouch('A');
+      match.recordTouch('A', player);
     }
   } else {
     HUD.setActiveHint('');
   }
 }
 
+// "Ligt de bal stil op de heg? Dan mag de tegenpartij niet ingrijpen. Het team
+// dat de bal over de heg probeerde te schieten, mag de bal alsnog een trap
+// geven, zodat die in het veld van de tegenstander belandt." Normal AI/human
+// play should reach and dislodge it; this is only a last-resort backstop in
+// case nobody manages to in time, so the point still resolves like a real kick
+// (through the same recordTouch accounting) instead of a random shove.
+function forceDislodgeHedgeBall() {
+  const team = match.turnTeam === 'A' ? teamA : teamB;
+  let kicker = team[0];
+  let bestDist = Infinity;
+  for (const p of team) {
+    const d = Math.hypot(ball.position.x - p.group.position.x, ball.position.z - p.group.position.z);
+    if (d < bestDist) { bestDist = d; kicker = p; }
+  }
+  const start = new THREE.Vector3(kicker.group.position.x, Math.max(ball.position.y, 0.2), kicker.group.position.z);
+  const sideSign = match.turnTeam === 'A' ? 1 : -1;
+  const target = new THREE.Vector3(
+    THREE.MathUtils.clamp((Math.random() - 0.5) * 8, -COURT.halfWidth + 0.6, COURT.halfWidth - 0.6),
+    0,
+    sideSign * (2.5 + Math.random() * 3)
+  );
+  const apex = COURT.hedge.height + 0.6 + Math.random() * 0.6;
+  const v = computeLaunchVelocity(start, target, apex);
+  ball.velocity.copy(v);
+  ball.position.y = Math.max(ball.position.y, 0.3);
+  kicker.triggerKick();
+  ball.lastTouchTeam = match.turnTeam;
+  match.recordTouch(match.turnTeam, kicker);
+  Audio.playKick();
+}
+
 function updateHedgeRestSafety(dt) {
   if (ball.restingOnHedge && match.phase === 'rally') {
     hedgeRestTimer += dt;
-    if (hedgeRestTimer > 2.3) {
-      const sign = match.turnTeam === 'A' ? -1 : 1;
-      ball.velocity.set((Math.random() - 0.5) * 1.2, 1.6, sign * 0.8);
+    if (hedgeRestTimer > 4.5) {
+      forceDislodgeHedgeBall();
       hedgeRestTimer = 0;
     }
   } else {

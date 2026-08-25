@@ -91,6 +91,12 @@ export class Ball {
   }
 
   handleHedge(prevPos) {
+    // A ball already settled on top of the hedge sits right where the graze
+    // zone below overlaps its resting height; without this guard, gravity's
+    // tiny per-substep nudge would re-trigger "grazing" every step and knock
+    // the resting velocity back up, fighting checkResting()'s clamp forever.
+    if (this.restingOnHedge) return;
+
     const { halfLength, halfThickness, height } = COURT.hedge;
     const r = this.radius;
     const withinX = Math.abs(this.position.x) <= halfLength + r;

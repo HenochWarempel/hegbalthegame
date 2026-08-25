@@ -91,17 +91,25 @@ export class HegbalMatch {
     this.trackedSide = receiverSide;
     this.bounceCount = 1;
     this.touchCount = 0;
+    this.touchPlayers = new Set();
     this.rallyTimer = 0;
     this.hooks.onBanner('', 0);
   }
 
-  // "Je moet minstens één keer overspelen": a team must pass the ball to a
-  // teammate at least once before sending it back over the hedge — you
-  // can't just return it on your very first touch.
-  recordTouch(team) {
+  // "Elk team moet de bal minstens één keer overspelen naar een teamgenoot
+  // voordat de bal over de heg naar het andere team mag": the ball must
+  // actually reach a second, different player on the team — not just be
+  // touched twice by the same one — before it's allowed to cross.
+  recordTouch(team, player) {
     if (this.phase === 'rally' && team === this.turnTeam) {
       this.touchCount = (this.touchCount || 0) + 1;
+      this.touchPlayers = this.touchPlayers || new Set();
+      if (player) this.touchPlayers.add(player);
     }
+  }
+
+  passedToTeammate() {
+    return (this.touchPlayers ? this.touchPlayers.size : 0) >= 2;
   }
 
   update(ball, dt) {
@@ -146,10 +154,14 @@ export class HegbalMatch {
     }
 
     if (this.phase === 'rally') {
-      if (currentSide !== this.trackedSide) {
+      // A ball balanced on top of the hedge hasn't actually crossed — its
+      // x/z can read as either side. Freeze crossing detection until it's
+      // moving again, so possession doesn't flicker to the other team while
+      // it's sitting there (only the hitting team may touch it meanwhile).
+      if (!ball.restingOnHedge && currentSide !== this.trackedSide) {
         const blockedThisFrame = events.some((e) => e.type === 'hedge_blocked');
         if (!blockedThisFrame) {
-          if ((this.touchCount || 0) < 2) {
+          if (!this.passedToTeammate()) {
             this.faultRally(other(this.turnTeam), 'NIET OVERGESPEELD');
             return;
           }
@@ -157,6 +169,7 @@ export class HegbalMatch {
           this.trackedSide = currentSide;
           this.bounceCount = 0;
           this.touchCount = 0;
+          this.touchPlayers = new Set();
           this.rallyTimer = 0;
         }
       }
@@ -173,7 +186,7 @@ export class HegbalMatch {
               return;
             }
           } else {
-            if ((this.touchCount || 0) < 2) {
+            if (!this.passedToTeammate()) {
               this.faultRally(other(this.turnTeam), 'NIET OVERGESPEELD');
               return;
             }
@@ -181,6 +194,7 @@ export class HegbalMatch {
             this.trackedSide = ev.side;
             this.bounceCount = 1;
             this.touchCount = 0;
+            this.touchPlayers = new Set();
             this.rallyTimer = 0;
           }
         }
