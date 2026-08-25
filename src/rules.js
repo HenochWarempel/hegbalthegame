@@ -186,7 +186,8 @@ export class HegbalMatch {
             // once, further bounces during their own handling may go long.
             const isReceptionBounce = (this.touchCount || 0) === 0;
             if (isReceptionBounce && !this.isInBounds(ev.x, ev.z)) {
-              this.faultRally(other(this.turnTeam), 'BUITEN HET VELD');
+              // The sender put it out — the receiving team wins the point.
+              this.faultRally(this.turnTeam, 'BUITEN HET VELD');
               return;
             }
             this.bounceCount = (this.bounceCount || 0) + 1;
@@ -200,7 +201,8 @@ export class HegbalMatch {
               return;
             }
             if (!this.isInBounds(ev.x, ev.z)) {
-              this.faultRally(this.turnTeam, 'BUITEN HET VELD');
+              // The sender put it out — the receiving side (ev.side) wins.
+              this.faultRally(ev.side, 'BUITEN HET VELD');
               return;
             }
             this.turnTeam = ev.side;
