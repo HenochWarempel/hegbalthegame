@@ -25,6 +25,8 @@ export class Player {
     this.kickTimer = 0;
     this.kickDuration = 0.34;
     this.diveTimer = 0;
+    this.hitCooldown = 0; // brief lockout after touching the ball, so the
+    // same player can't immediately re-hit it before it's even left them
     this.facing = team === 'A' ? 1 : -1; // which way is "forward" (toward hedge)
 
     this.group = new THREE.Group();
@@ -127,6 +129,8 @@ export class Player {
   }
 
   update(dt) {
+    if (this.hitCooldown > 0) this.hitCooldown -= dt;
+
     const speedFrac = THREE.MathUtils.clamp(this.velocity.length() / this.speed, 0, 1);
     this.animSpeed = speedFrac;
 

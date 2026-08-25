@@ -47,6 +47,7 @@ let gameStarted = false;
 let hedgeRestTimer = 0;
 let prevTotalScore = 0;
 let serveCountdown = 0;
+let difficulty = 'medium';
 
 const match = new HegbalMatch({
   onScore(score, setsA, setsB) {
@@ -197,9 +198,10 @@ function handleHumanInput(dt) {
     HUD.setActiveHint(canTouch && dist < REACH + 0.5
       ? (willPass ? 'Spatie: overspelen naar teamgenoot' : 'Spatie: speel de bal over de heg')
       : '');
-    if (spacePressed && canTouch && dist < REACH && ball.position.y < MAX_HIT_HEIGHT) {
+    if (spacePressed && canTouch && dist < REACH && ball.position.y < MAX_HIT_HEIGHT && (player.hitCooldown || 0) <= 0) {
       humanHit(player, false);
       match.recordTouch('A', player);
+      player.hitCooldown = 0.5;
     }
   } else {
     HUD.setActiveHint('');
@@ -261,7 +263,7 @@ function animate() {
     }
     handleHumanInput(dt);
     updateAI(dt, {
-      teamA, teamB, ball, match,
+      teamA, teamB, ball, match, difficulty,
       onHit(team) { Audio.playKick(); },
     });
     ball.update(dt);
@@ -290,6 +292,13 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+document.querySelectorAll('.diff-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    difficulty = btn.dataset.diff;
+    document.querySelectorAll('.diff-btn').forEach((b) => b.classList.toggle('active', b === btn));
+  });
+});
+
 let matchesPlayed = 0;
 document.getElementById('startBtn').addEventListener('click', () => {
   HUD.hideOverlay();
@@ -303,7 +312,8 @@ HUD.hideLoading();
 HUD.showOverlay();
 
 if (window.__HEGBAL_DEBUG__) {
-  window.__debug = { ball, match, teamA, teamB, get humanIndex() { return humanIndex; } };
+  window.__debug = { ball, match, teamA, teamB, get humanIndex() { return humanIndex; }, get difficulty() { return difficulty; } };
+  window.__updateAITick = () => updateAI(1 / 60, { teamA, teamB, ball, match, difficulty, onHit() {} });
 }
 
 animate();

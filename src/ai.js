@@ -5,6 +5,12 @@ import { computeLaunchVelocity, GRAVITY } from './ball.js';
 const REACH = 0.75;
 const MAX_HIT_HEIGHT = 2.35;
 
+// How often the opponent (team B) botches the "pass to a teammate first"
+// rule and just smacks it back over on their first touch — which the rules
+// engine then correctly punishes as a fault. Team A's own players never do
+// this on purpose; the difficulty only tunes how sharp the opponent is.
+const OPPONENT_MISTAKE_RATE = { easy: 0.32, medium: 0.1, hard: 0.015 };
+
 function clampToCourt(x, z) {
   return {
     x: THREE.MathUtils.clamp(x, -COURT.halfWidth + 0.4, COURT.halfWidth - 0.4),
@@ -48,12 +54,12 @@ function predictLandingX(ball) {
   return ball.position.x + ball.velocity.x * Math.max(t, 0);
 }
 
-export function updateAI(dt, { teamA, teamB, ball, match, onHit }) {
-  updateTeamAI(dt, teamA, teamB, ball, match, 'A', onHit);
-  updateTeamAI(dt, teamB, teamA, ball, match, 'B', onHit);
+export function updateAI(dt, { teamA, teamB, ball, match, onHit, difficulty }) {
+  updateTeamAI(dt, teamA, teamB, ball, match, 'A', onHit, difficulty);
+  updateTeamAI(dt, teamB, teamA, ball, match, 'B', onHit, difficulty);
 }
 
-function updateTeamAI(dt, team, opponents, ball, match, teamId, onHit) {
+function updateTeamAI(dt, team, opponents, ball, match, teamId, onHit, difficulty) {
   const aiPlayers = team.filter((p) => !p.isHuman);
   if (aiPlayers.length === 0) return;
 
@@ -72,11 +78,19 @@ function updateTeamAI(dt, team, opponents, ball, match, teamId, onHit) {
   const predictedX = predictLandingX(ball);
   let receiver = null;
   if (!serving && aiPlayers.length) {
-    receiver = aiPlayers.reduce((best, p) => {
+    // Exclude whoever already touched the ball this possession so a
+    // genuinely different teammate is the one who steps in next — a plain
+    // time-based cooldown isn't enough, since a short pass can legitimately
+    // stay closest to the original hitter once the cooldown expires.
+    const alreadyTouched = (match.phase === 'rally' && match.touchPlayers) || new Set();
+    const untouched = aiPlayers.filter((p) => !alreadyTouched.has(p) && (p.hitCooldown || 0) <= 0);
+    const pool = untouched.length ? untouched : aiPlayers.filter((p) => (p.hitCooldown || 0) <= 0);
+    const finalPool = pool.length ? pool : aiPlayers;
+    receiver = finalPool.reduce((best, p) => {
       const d = Math.abs(p.homeSlot.x - predictedX);
       const bd = Math.abs(best.homeSlot.x - predictedX);
       return d < bd ? p : best;
-    }, aiPlayers[0]);
+    }, finalPool[0]);
   }
 
   for (const player of aiPlayers) {
@@ -116,17 +130,19 @@ function updateTeamAI(dt, team, opponents, ball, match, teamId, onHit) {
     }
 
     // Attempt a hit when in reach, it's our turn/serve, and this player is the
-    // one tasked with playing the ball.
+    // one tasked with playing the ball (and isn't still cooling down from
+    // having just touched it).
     const isDesignatedHitter = (serving && player === server) || (!serving && player === receiver);
     const allowedToAct = !serving || (match.serveReady !== false && !match.serveStruck);
-    if (isDesignatedHitter && ourTurn && allowedToAct) {
+    if (isDesignatedHitter && ourTurn && allowedToAct && (player.hitCooldown || 0) <= 0) {
       const dx = ball.position.x - player.group.position.x;
       const dz = ball.position.z - player.group.position.z;
       const distToBall = Math.hypot(dx, dz);
       if (distToBall < REACH && ball.position.y < MAX_HIT_HEIGHT && ball.velocity.y <= 6) {
         if (serving) match.serveStruck = true;
-        hit(player, ball, team, opponents, teamId, serving, match, onHit);
+        hit(player, ball, team, opponents, teamId, serving, match, difficulty, onHit);
         match.recordTouch(teamId, player);
+        player.hitCooldown = 0.5;
       }
     }
 
@@ -134,11 +150,17 @@ function updateTeamAI(dt, team, opponents, ball, match, teamId, onHit) {
   }
 }
 
-function hit(player, ball, team, opponents, teamId, serving, match, onHit) {
+function hit(player, ball, team, opponents, teamId, serving, match, difficulty, onHit) {
   const start = new THREE.Vector3(player.group.position.x, Math.max(ball.position.y, 0.2), player.group.position.z);
   // The rules require at least one pass to a teammate before sending it back
-  // over the hedge, so the first touch of a possession is always a soft set.
-  const mustPassFirst = !serving && (match.touchCount || 0) === 0 && team.length > 1;
+  // over the hedge, so the first touch of a possession is always a soft set —
+  // except the opponent occasionally botches this (the difficulty setting
+  // tunes how often), which the rules engine then correctly punishes.
+  let mustPassFirst = !serving && (match.touchCount || 0) === 0 && team.length > 1;
+  if (mustPassFirst && teamId === 'B') {
+    const mistakeRate = OPPONENT_MISTAKE_RATE[difficulty] ?? OPPONENT_MISTAKE_RATE.medium;
+    if (Math.random() < mistakeRate) mustPassFirst = false;
+  }
 
   let target, apexWorld;
   if (mustPassFirst) {

@@ -60,7 +60,16 @@
     -webkit-background-clip: text; background-clip: text; color: transparent;
     text-shadow: 0 8px 24px rgba(0,0,0,.6);
   }
-  #overlay .sub { font-size: 16px; letter-spacing: 4px; opacity: .8; margin-top: -6px; margin-bottom: 30px; text-transform: uppercase; }
+  #overlay .sub { font-size: 16px; letter-spacing: 4px; opacity: .8; margin-top: -6px; margin-bottom: 22px; text-transform: uppercase; }
+  .diff-select { pointer-events: all; display: flex; gap: 8px; margin-bottom: 4px; }
+  #overlay button.diff-btn {
+    font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    padding: 8px 18px; margin: 0; border-radius: 20px; border: 2px solid rgba(255,227,122,.4); color: #d8dccb;
+    background: rgba(255,255,255,.05); cursor: pointer; transition: all .15s ease; box-shadow: none;
+  }
+  #overlay button.diff-btn:hover { border-color: #ffe37a; color: #fff; filter: none; }
+  #overlay button.diff-btn:active { transform: none; box-shadow: none; }
+  #overlay button.diff-btn.active { background: #ffe37a; border-color: #ffe37a; color: #222; }
   #overlay button {
     pointer-events: all; font-size: 20px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
     padding: 14px 46px; margin: 6px; border-radius: 40px; border: 3px solid #ffe37a; color: #222;
@@ -86,6 +95,11 @@
   <div id="overlay" class="hidden">
     <h1>HEGBAL</h1>
     <div class="sub">Parkeerplaats Kampioenschap</div>
+    <div class="diff-select" id="diffSelect">
+      <button class="diff-btn" data-diff="easy">Makkelijk</button>
+      <button class="diff-btn active" data-diff="medium">Gemiddeld</button>
+      <button class="diff-btn" data-diff="hard">Moeilijk</button>
+    </div>
     <div>
       <button id="startBtn">Speel</button>
     </div>
