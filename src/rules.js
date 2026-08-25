@@ -180,6 +180,15 @@ export class HegbalMatch {
         }
         if (ev.type === 'bounce') {
           if (ev.side === this.turnTeam) {
+            // The very first bounce of a turn — before the receiving side has
+            // touched the ball at all — is the crossing shot landing. That one
+            // must land inside the field; once they've played it at least
+            // once, further bounces during their own handling may go long.
+            const isReceptionBounce = (this.touchCount || 0) === 0;
+            if (isReceptionBounce && !this.isInBounds(ev.x, ev.z)) {
+              this.faultRally(other(this.turnTeam), 'BUITEN HET VELD');
+              return;
+            }
             this.bounceCount = (this.bounceCount || 0) + 1;
             if (this.bounceCount >= 2) {
               this.faultRally(other(this.turnTeam), 'TWEE KEER GESTUITERD');
@@ -188,6 +197,10 @@ export class HegbalMatch {
           } else {
             if (!this.passedToTeammate()) {
               this.faultRally(other(this.turnTeam), 'NIET OVERGESPEELD');
+              return;
+            }
+            if (!this.isInBounds(ev.x, ev.z)) {
+              this.faultRally(this.turnTeam, 'BUITEN HET VELD');
               return;
             }
             this.turnTeam = ev.side;
