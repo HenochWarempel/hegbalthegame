@@ -8,6 +8,8 @@ import { createCamera, updateCamera } from './camera.js';
 import { Input } from './input.js';
 import * as HUD from './hud.js';
 import * as Audio from './audio.js';
+import { ROSTER, DEFAULT_APPEARANCE, rosterById } from './roster.js';
+import { portraitDataURL } from './portraits.js';
 
 const app = document.getElementById('app');
 
@@ -475,15 +477,151 @@ document.querySelectorAll('.diff-btn').forEach((btn) => {
 });
 
 let matchesPlayed = 0;
-document.getElementById('startBtn').addEventListener('click', () => {
-  HUD.hideOverlay();
+
+// ---- Character select: pick who you play as, your 2 teammates and the 3
+// opponents (or let the game pick opponents automatically) from the roster. ----
+let tsMode = 'you';       // 'you' | 'mate' | 'opp'
+let tsYou = null;         // roster id, or null when using the custom-name input
+let tsMates = [];         // up to 2 roster ids
+let tsOpps = [];          // up to 3 roster ids
+const portraitCache = new Map();
+function portraitFor(entry) {
+  if (!portraitCache.has(entry.id)) portraitCache.set(entry.id, portraitDataURL(entry, 128));
+  return portraitCache.get(entry.id);
+}
+
+function removeFromAllRoles(id) {
+  if (tsYou === id) tsYou = null;
+  tsMates = tsMates.filter((x) => x !== id);
+  tsOpps = tsOpps.filter((x) => x !== id);
+}
+
+function onRosterCardClick(id) {
+  const autoOpp = document.getElementById('autoOppCheck').checked;
+  if (tsMode === 'you') {
+    if (tsYou === id) tsYou = null;
+    else { removeFromAllRoles(id); tsYou = id; document.getElementById('youNameInput').value = ''; }
+  } else if (tsMode === 'mate') {
+    if (tsMates.includes(id)) tsMates = tsMates.filter((x) => x !== id);
+    else if (tsMates.length < 2) { removeFromAllRoles(id); tsMates.push(id); }
+  } else if (tsMode === 'opp') {
+    if (autoOpp) return;
+    if (tsOpps.includes(id)) tsOpps = tsOpps.filter((x) => x !== id);
+    else if (tsOpps.length < 3) { removeFromAllRoles(id); tsOpps.push(id); }
+  }
+  renderRoster();
+}
+
+function renderRoster() {
+  const grid = document.getElementById('rosterGrid');
+  const autoOpp = document.getElementById('autoOppCheck').checked;
+  if (!grid.childElementCount) {
+    for (const entry of ROSTER) {
+      const card = document.createElement('div');
+      card.className = 'roster-card';
+      card.dataset.id = entry.id;
+      card.innerHTML = `<img src="${portraitFor(entry)}" alt="" /><div class="rc-name">${entry.name}</div><div class="rc-badge"></div>`;
+      card.addEventListener('click', () => onRosterCardClick(entry.id));
+      grid.appendChild(card);
+    }
+  }
+  for (const card of grid.children) {
+    const id = card.dataset.id;
+    const badge = card.querySelector('.rc-badge');
+    card.classList.remove('role-you', 'role-mate', 'role-opp', 'disabled');
+    if (tsYou === id) { card.classList.add('role-you'); badge.textContent = 'JIJ'; }
+    else if (tsMates.includes(id)) { card.classList.add('role-mate'); badge.textContent = 'MAAT'; }
+    else if (tsOpps.includes(id)) { card.classList.add('role-opp'); badge.textContent = 'TEGEN'; }
+    else if (tsMode === 'opp' && autoOpp) card.classList.add('disabled');
+  }
+
+  document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === tsMode));
+  document.getElementById('mateCount').textContent = String(tsMates.length);
+  document.getElementById('oppCount').textContent = String(autoOpp ? 0 : tsOpps.length);
+
+  const youLabel = tsYou ? rosterById(tsYou).name : (document.getElementById('youNameInput').value.trim() || 'nog niet gekozen');
+  const mateLabel = tsMates.length ? tsMates.map((id) => rosterById(id).name).join(', ') : 'automatisch aangevuld';
+  const oppLabel = autoOpp ? 'automatisch' : (tsOpps.length ? tsOpps.map((id) => rosterById(id).name).join(', ') : 'automatisch aangevuld');
+  document.getElementById('tsSummary').innerHTML =
+    `Jij: <b>${youLabel}</b> &middot; Team: <b>${mateLabel}</b> &middot; Tegenstander: <b>${oppLabel}</b>`;
+}
+
+document.querySelectorAll('.mode-btn').forEach((btn) => {
+  btn.addEventListener('click', () => { tsMode = btn.dataset.mode; renderRoster(); });
+});
+document.getElementById('youNameInput').addEventListener('input', (e) => {
+  if (e.target.value.trim()) tsYou = null;
+  renderRoster();
+});
+document.getElementById('autoOppCheck').addEventListener('change', (e) => {
+  if (e.target.checked) tsOpps = [];
+  renderRoster();
+});
+document.getElementById('btnTsBack').addEventListener('click', () => {
+  HUD.hideTeamSelect();
+  HUD.showOverlay();
+});
+
+function shuffled(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function pickRandomUnused(excludeIds, count) {
+  const excl = new Set(excludeIds.filter(Boolean));
+  return shuffled(ROSTER.filter((r) => !excl.has(r.id))).slice(0, count).map((r) => r.id);
+}
+
+function startMatchFromSelection() {
+  const nameInput = document.getElementById('youNameInput').value.trim();
+  const youAppearance = tsYou ? rosterById(tsYou) : DEFAULT_APPEARANCE;
+  const youName = tsYou ? rosterById(tsYou).name : (nameInput || 'Jij');
+
+  let mateIds = tsMates.slice();
+  if (mateIds.length < 2) {
+    mateIds = mateIds.concat(pickRandomUnused([tsYou, ...mateIds, ...tsOpps], 2 - mateIds.length));
+  }
+
+  const autoOpp = document.getElementById('autoOppCheck').checked;
+  let oppIds = autoOpp ? [] : tsOpps.slice();
+  if (autoOpp || oppIds.length < 3) {
+    oppIds = oppIds.concat(pickRandomUnused([tsYou, ...mateIds, ...oppIds], 3 - oppIds.length));
+  }
+
+  const mateA = mateIds.map(rosterById);
+  const oppA = oppIds.map(rosterById);
+
+  teamA[0].applyAppearance(mateA[0]);
+  teamA[1].applyAppearance({ ...youAppearance, name: youName });
+  teamA[2].applyAppearance(mateA[1]);
+  teamB[0].applyAppearance(oppA[0]);
+  teamB[1].applyAppearance(oppA[1]);
+  teamB[2].applyAppearance(oppA[2]);
+
+  for (const p of teamA) p.isHuman = false;
+  teamA[1].isHuman = true;
+  humanIndex = 1;
+
+  HUD.setTeamLabels(`TEAM ${youName}`.toUpperCase(), 'TEGENSTANDER');
+
+  HUD.hideTeamSelect();
   Audio.playKick();
   if (matchesPlayed > 0) match.rematch();
   matchesPlayed++;
   decidingMatch = false;
   Input.clearFrame(); // drop the starting click so it isn't read as a serve
   gameStarted = true;
+}
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  HUD.hideOverlay();
+  HUD.showTeamSelect();
+  renderRoster();
 });
+document.getElementById('btnStartMatch').addEventListener('click', startMatchFromSelection);
 
 document.getElementById('btnRematch').addEventListener('click', () => {
   HUD.hideGameOver();

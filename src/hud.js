@@ -74,7 +74,14 @@ export function setPower(frac, visible) {
 
 export function showOverlay() { el('overlay').classList.remove('hidden'); }
 export function hideOverlay() { el('overlay').classList.add('hidden'); }
+export function showTeamSelect() { el('teamSelect').classList.remove('hidden'); }
+export function hideTeamSelect() { el('teamSelect').classList.add('hidden'); }
 export function hideLoading() { el('loading').style.display = 'none'; }
+
+export function setTeamLabels(nameA, nameB) {
+  if (nameA) el('teamAName').textContent = nameA;
+  if (nameB) el('teamBName').textContent = nameB;
+}
 
 export function setMatchOverText(text) {
   el('matchOver').textContent = text;

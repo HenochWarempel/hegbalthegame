@@ -20,6 +20,15 @@ python3 -m http.server 8000
 
 Then open `http://localhost:8000/`.
 
+## Kies je team
+
+After picking a difficulty, "Kies je team" opens a roster of 13 named
+characters (each with a distinct hairstyle and outfit color). Pick who you
+play as — either by selecting a character or typing your own name — your 2
+teammates, and either 3 opponents or leave "Kies zelf mijn tegenstanders"
+checked to let the game pick them. Anything left unpicked is filled in
+automatically when the match starts.
+
 ## Controls
 
 - **WASD** (or arrow keys) — move your player
@@ -53,7 +62,9 @@ Then open `http://localhost:8000/`.
 - `index.html` — page shell, HUD markup, import map for three.js
 - `src/main.js` — app entry point: rendering loop, input, hooks everything up
 - `src/court.js` — the parking-lot/hedge/houses scene
-- `src/players.js` — low-poly player rig and team setup
+- `src/players.js` — low-poly player rig, team setup and appearance re-skinning
+- `src/roster.js` — the 13 selectable characters (name/hair/outfit)
+- `src/portraits.js` — 2D canvas portrait generator for the team-select screen
 - `src/ball.js` — ball physics, ground/hedge collision
 - `src/ai.js` — AI teammates and opponents
 - `src/rules.js` — the Hegbal rules/scoring state machine

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DEFAULT_APPEARANCE } from './roster.js';
 
 const SKIN_TONES = [0xf0c9a0, 0xe0b394, 0xc68a5f, 0x8d5a3c];
 const HAIR_TONES = [0x2b1c14, 0x1a1a1a, 0x5c3a22, 0x0d0d0d, 0x6b4a2a];
@@ -7,6 +8,10 @@ const lerp = THREE.MathUtils.lerp;
 
 function mat(color, rough = 0.8) {
   return new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0.0 });
+}
+
+function darken(color, f = 0.72) {
+  return new THREE.Color(color).multiplyScalar(f).getHex();
 }
 
 // A limb segment whose group pivot sits at the top joint, capsule hanging down.
@@ -20,8 +25,52 @@ function segment(len, rad, material) {
   return g;
 }
 
+// Builds the hair meshes for one of the roster hairStyle vocabulary values,
+// as a group parented under the head. Kept separate from buildMesh so
+// applyAppearance() can throw the whole group away and rebuild it.
+function buildHair(style, material) {
+  const g = new THREE.Group();
+  const add = (mesh) => { mesh.castShadow = true; g.add(mesh); return mesh; };
+  switch (style) {
+    case 'bald':
+      break;
+    case 'buzz':
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.138, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.55), material));
+      break;
+    case 'quiff': {
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.142, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.6), material));
+      const tuft = add(new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.12, 10), material));
+      tuft.position.set(0, 0.1, 0.05);
+      tuft.rotation.x = -0.5;
+      break;
+    }
+    case 'mid': {
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.15, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.72), material));
+      const sideL = add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), material));
+      sideL.position.set(-0.135, -0.02, 0.01);
+      sideL.scale.set(0.8, 1.3, 0.9);
+      const sideR = add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), material));
+      sideR.position.set(0.135, -0.02, 0.01);
+      sideR.scale.set(0.8, 1.3, 0.9);
+      break;
+    }
+    case 'long': {
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.15, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.72), material));
+      const back = add(new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.22, 6, 12), material));
+      back.position.set(0, -0.14, -0.02);
+      back.scale.set(0.9, 1, 0.55);
+      break;
+    }
+    case 'short':
+    default:
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.142, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.62), material));
+      break;
+  }
+  return g;
+}
+
 export class Player {
-  constructor({ team, index, jersey, isHuman, name }) {
+  constructor({ team, index, appearance, isHuman, name }) {
     this.team = team;
     this.index = index;
     this.isHuman = isHuman;
@@ -39,18 +88,29 @@ export class Player {
     this.facing = team === 'A' ? 1 : -1;
 
     this.group = new THREE.Group();
-    this.buildMesh(jersey);
+    this.appearance = {
+      hairStyle: 'short',
+      hairColor: HAIR_TONES[index % HAIR_TONES.length],
+      outfit: appearance && appearance.outfit != null ? appearance.outfit : 0x2255cc,
+      glasses: false,
+      beard: false,
+      ...appearance,
+    };
+    this.buildMesh(this.appearance);
+    this._builtHairStyle = this.appearance.hairStyle;
   }
 
-  buildMesh(jerseyColor) {
+  buildMesh(appearance) {
     const skin = SKIN_TONES[this.index % SKIN_TONES.length];
     const skinMat = mat(skin, 0.85);
-    const jerseyMat = mat(jerseyColor, 0.7);
-    const jerseyDark = mat(new THREE.Color(jerseyColor).multiplyScalar(0.8).getHex(), 0.7);
-    const shortsMat = mat(0x2a2f3a, 0.75);
+    const jerseyMat = mat(appearance.outfit, 0.7);
+    const shortsMat = mat(darken(appearance.outfit), 0.75);
     const shoeMat = mat(0xf4f4ef, 0.55);
     const soleMat = mat(0x20242b, 0.6);
-    const hairMat = mat(HAIR_TONES[this.index % HAIR_TONES.length], 0.9);
+    const hairMat = mat(appearance.hairColor, 0.9);
+    this.jerseyMat = jerseyMat;
+    this.shortsMat = shortsMat;
+    this.hairMat = hairMat;
 
     const rig = new THREE.Group();
     this.rig = rig;
@@ -89,14 +149,38 @@ export class Player {
     head.castShadow = true;
     rig.add(head);
     this.head = head;
-    const hair = new THREE.Mesh(
-      new THREE.SphereGeometry(0.142, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.62), hairMat);
+    const hair = buildHair(appearance.hairStyle, hairMat);
     hair.position.y = 1.68;
     rig.add(hair);
+    this.hair = hair;
     // nose hint so the facing reads
     const nose = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), skinMat);
     nose.position.set(0, 1.65, 0.13);
     rig.add(nose);
+
+    const beardMat = mat(appearance.hairColor, 0.9);
+    this.beardMat = beardMat;
+    const beard = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 8, 0, Math.PI * 2, Math.PI * 0.35, Math.PI * 0.4), beardMat);
+    beard.position.set(0, 1.585, 0.05);
+    beard.scale.set(1, 0.9, 0.85);
+    beard.visible = !!appearance.beard;
+    rig.add(beard);
+    this.beard = beard;
+
+    const glassesMat = mat(0x1a1a1a, 0.4);
+    const glasses = new THREE.Group();
+    const lensGeo = new THREE.TorusGeometry(0.032, 0.008, 6, 14);
+    const lensL = new THREE.Mesh(lensGeo, glassesMat);
+    lensL.position.set(-0.05, 1.655, 0.125);
+    const lensR = new THREE.Mesh(lensGeo, glassesMat);
+    lensR.position.set(0.05, 1.655, 0.125);
+    const bridge = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.036, 6), glassesMat);
+    bridge.rotation.z = Math.PI / 2;
+    bridge.position.set(0, 1.655, 0.125);
+    glasses.add(lensL, lensR, bridge);
+    glasses.visible = !!appearance.glasses;
+    rig.add(glasses);
+    this.glasses = glasses;
 
     // ---- Arms: shoulder -> upper -> elbow -> forearm -> hand ----
     const makeArm = (side) => {
@@ -184,6 +268,39 @@ export class Player {
     this.group.add(ao);
   }
 
+  // Re-skins this player in place: outfit color (jersey + shorts), hair
+  // style/color, glasses/beard, and display name. Used to apply a roster
+  // pick (or a custom look) chosen on the start screen without rebuilding
+  // the whole rig.
+  applyAppearance(appearance) {
+    // Each call is a full re-skin (not a partial patch), so accessories the
+    // new appearance doesn't mention (glasses, beard) must reset to off
+    // rather than keep whatever the previous character had.
+    const next = { ...this.appearance, ...appearance, glasses: !!appearance.glasses, beard: !!appearance.beard };
+    this.appearance = next;
+    if (appearance.name !== undefined) this.name = appearance.name;
+
+    this.jerseyMat.color.set(next.outfit);
+    this.shortsMat.color.set(darken(next.outfit));
+
+    this.hairMat.color.set(next.hairColor);
+    this.beardMat.color.set(next.hairColor);
+    this.beard.visible = next.beard;
+    this.glasses.visible = next.glasses;
+
+    if (appearance.hairStyle && appearance.hairStyle !== this._builtHairStyle) {
+      const parent = this.hair.parent;
+      const pos = this.hair.position.clone();
+      parent.remove(this.hair);
+      this.hair.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      const hair = buildHair(next.hairStyle, this.hairMat);
+      hair.position.copy(pos);
+      parent.add(hair);
+      this.hair = hair;
+    }
+    this._builtHairStyle = next.hairStyle;
+  }
+
   setMarkerVisible(visible, color = 0xffe37a) {
     this.marker.material.opacity = visible ? 0.85 : 0;
     this.marker.material.color.set(color);
@@ -258,7 +375,10 @@ export function createTeams(scene) {
   ];
 
   const teamA = layout.map((slot, i) => {
-    const p = new Player({ team: 'A', index: i, jersey: TEAM_A_JERSEY, isHuman: i === 1, name: `Blauw ${i + 1}` });
+    const p = new Player({
+      team: 'A', index: i, appearance: { ...DEFAULT_APPEARANCE, outfit: TEAM_A_JERSEY },
+      isHuman: i === 1, name: `Blauw ${i + 1}`,
+    });
     p.homeSlot = { x: slot.x, z: -slot.z };
     p.group.position.set(slot.x, 0, -slot.z);
     p.group.rotation.y = Math.PI;
@@ -267,7 +387,10 @@ export function createTeams(scene) {
   });
 
   const teamB = layout.map((slot, i) => {
-    const p = new Player({ team: 'B', index: i, jersey: TEAM_B_JERSEY, isHuman: false, name: `Rood ${i + 1}` });
+    const p = new Player({
+      team: 'B', index: i, appearance: { ...DEFAULT_APPEARANCE, outfit: TEAM_B_JERSEY },
+      isHuman: false, name: `Rood ${i + 1}`,
+    });
     p.homeSlot = { x: -slot.x, z: slot.z };
     p.group.position.set(-slot.x, 0, slot.z);
     p.group.rotation.y = 0;
