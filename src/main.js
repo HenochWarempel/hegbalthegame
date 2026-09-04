@@ -333,14 +333,13 @@ function handleHumanInput(dt) {
   if (isServing) {
     const behindLine = Math.abs(player.group.position.z) >= COURT.depth - 0.1;
     HUD.setActiveHint(match.serveStruck ? '' : behindLine
-      ? 'Muis richt | linkermuis of Spatie: vasthouden voor kracht, loslaten om te slaan | Shift = uit de hand'
+      ? 'Muis richt | linkermuis of Spatie: vasthouden voor kracht, loslaten om te slaan'
       : 'Ga achter de achterlijn staan!');
     HUD.setPower(chargeFrac, !match.serveStruck && behindLine && actionDown);
     if (actionUp && !match.serveStruck) {
       if (!behindLine) {
         HUD.showBanner('GA ACHTER DE LIJN STAAN', 700);
       } else {
-        if (Input.isDown('ShiftLeft') || Input.isDown('ShiftRight')) ball.position.y = 1.1;
         match.serveStruck = true;
         humanHit(player, true, chargeFrac, aimPt ? aimPt.clone() : null);
       }
@@ -478,134 +477,164 @@ document.querySelectorAll('.diff-btn').forEach((btn) => {
 
 let matchesPlayed = 0;
 
-// ---- Character select: pick who you play as, your 2 teammates and the 3
-// opponents (or let the game pick opponents automatically) from the roster. ----
-let tsMode = 'you';       // 'you' | 'mate' | 'opp'
-let tsYou = null;         // roster id, or null when using the custom-name input
-let tsMates = [];         // up to 2 roster ids
-let tsOpps = [];          // up to 3 roster ids
+// ---- Character select: a 3-step wizard. Step 1 picks who you play as,
+// step 2 your 2 teammates, step 3 the 3 opponents. On every step, each slot
+// is filled either by clicking a roster portrait or by typing a name. ----
+const STEP_META = [
+  { title: 'WIE BEN JIJ?', sub: 'Klik je poppetje aan, of typ je naam.', placeholders: ['Jouw naam'] },
+  { title: 'KIES JE TWEE TEAMGENOTEN', sub: 'Klik twee poppetjes aan, of typ twee namen.', placeholders: ['Teamgenoot 1', 'Teamgenoot 2'] },
+  { title: 'KIES JE DRIE TEGENSTANDERS', sub: 'Klik drie poppetjes aan, of typ drie namen.', placeholders: ['Tegenstander 1', 'Tegenstander 2', 'Tegenstander 3'] },
+];
+let tsStep = 1; // 1, 2, or 3
+// Each step holds an array of slots; a slot is { rosterId, name }.
+let tsSlots = [
+  [{ rosterId: null, name: '' }],
+  [{ rosterId: null, name: '' }, { rosterId: null, name: '' }],
+  [{ rosterId: null, name: '' }, { rosterId: null, name: '' }, { rosterId: null, name: '' }],
+];
+let tsSlotInputEls = [];
+
 const portraitCache = new Map();
 function portraitFor(entry) {
   if (!portraitCache.has(entry.id)) portraitCache.set(entry.id, portraitDataURL(entry, 128));
   return portraitCache.get(entry.id);
 }
 
-function removeFromAllRoles(id) {
-  if (tsYou === id) tsYou = null;
-  tsMates = tsMates.filter((x) => x !== id);
-  tsOpps = tsOpps.filter((x) => x !== id);
+function currentSlots() { return tsSlots[tsStep - 1]; }
+function isSlotFilled(slot) { return !!slot.rosterId || slot.name.trim().length > 0; }
+function stepValid() { return currentSlots().every(isSlotFilled); }
+// A roster id used in a *different* step than the one being edited right now.
+function usedElsewhere(id) {
+  return tsSlots.some((slots, i) => i !== tsStep - 1 && slots.some((s) => s.rosterId === id));
+}
+
+function updateGridHighlight() {
+  const slots = currentSlots();
+  for (const card of document.getElementById('rosterGrid').children) {
+    const id = card.dataset.id;
+    const badge = card.querySelector('.rc-badge');
+    const idx = slots.findIndex((s) => s.rosterId === id);
+    card.classList.toggle('picked', idx >= 0);
+    card.classList.toggle('disabled', idx < 0 && usedElsewhere(id));
+    badge.textContent = idx >= 0 ? (slots.length > 1 ? String(idx + 1) : 'JIJ') : '';
+  }
+}
+
+function updateSummary() {
+  const label = (slots) => slots.every((s) => !isSlotFilled(s))
+    ? 'nog niet gekozen'
+    : slots.map((s) => (isSlotFilled(s) ? (s.name.trim() || '?') : '...')).join(', ');
+  document.getElementById('tsSummary').innerHTML =
+    `Jij: <b>${label(tsSlots[0])}</b> &middot; Team: <b>${label(tsSlots[1])}</b> &middot; Tegenstander: <b>${label(tsSlots[2])}</b>`;
+}
+
+function updateNextButton() {
+  document.getElementById('btnTsNext').disabled = !stepValid();
 }
 
 function onRosterCardClick(id) {
-  const autoOpp = document.getElementById('autoOppCheck').checked;
-  if (tsMode === 'you') {
-    if (tsYou === id) tsYou = null;
-    else { removeFromAllRoles(id); tsYou = id; document.getElementById('youNameInput').value = ''; }
-  } else if (tsMode === 'mate') {
-    if (tsMates.includes(id)) tsMates = tsMates.filter((x) => x !== id);
-    else if (tsMates.length < 2) { removeFromAllRoles(id); tsMates.push(id); }
-  } else if (tsMode === 'opp') {
-    if (autoOpp) return;
-    if (tsOpps.includes(id)) tsOpps = tsOpps.filter((x) => x !== id);
-    else if (tsOpps.length < 3) { removeFromAllRoles(id); tsOpps.push(id); }
+  if (usedElsewhere(id)) return;
+  const slots = currentSlots();
+  const ownIdx = slots.findIndex((s) => s.rosterId === id);
+  if (ownIdx >= 0) {
+    slots[ownIdx].rosterId = null;
+    slots[ownIdx].name = '';
+    tsSlotInputEls[ownIdx].value = '';
+  } else {
+    const emptyIdx = slots.findIndex((s) => !isSlotFilled(s));
+    if (emptyIdx < 0) return; // all slots already filled — deselect one first
+    const entry = rosterById(id);
+    slots[emptyIdx].rosterId = id;
+    slots[emptyIdx].name = entry.name;
+    tsSlotInputEls[emptyIdx].value = entry.name;
   }
-  renderRoster();
+  updateGridHighlight();
+  updateSummary();
+  updateNextButton();
 }
 
-function renderRoster() {
+function mountRosterGrid() {
   const grid = document.getElementById('rosterGrid');
-  const autoOpp = document.getElementById('autoOppCheck').checked;
-  if (!grid.childElementCount) {
-    for (const entry of ROSTER) {
-      const card = document.createElement('div');
-      card.className = 'roster-card';
-      card.dataset.id = entry.id;
-      card.innerHTML = `<img src="${portraitFor(entry)}" alt="" /><div class="rc-name">${entry.name}</div><div class="rc-badge"></div>`;
-      card.addEventListener('click', () => onRosterCardClick(entry.id));
-      grid.appendChild(card);
-    }
+  if (grid.childElementCount) return;
+  for (const entry of ROSTER) {
+    const card = document.createElement('div');
+    card.className = 'roster-card';
+    card.dataset.id = entry.id;
+    card.innerHTML = `<img src="${portraitFor(entry)}" alt="" /><div class="rc-name">${entry.name}</div><div class="rc-badge"></div>`;
+    card.addEventListener('click', () => onRosterCardClick(entry.id));
+    grid.appendChild(card);
   }
-  for (const card of grid.children) {
-    const id = card.dataset.id;
-    const badge = card.querySelector('.rc-badge');
-    card.classList.remove('role-you', 'role-mate', 'role-opp', 'disabled');
-    if (tsYou === id) { card.classList.add('role-you'); badge.textContent = 'JIJ'; }
-    else if (tsMates.includes(id)) { card.classList.add('role-mate'); badge.textContent = 'MAAT'; }
-    else if (tsOpps.includes(id)) { card.classList.add('role-opp'); badge.textContent = 'TEGEN'; }
-    else if (tsMode === 'opp' && autoOpp) card.classList.add('disabled');
-  }
-
-  document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === tsMode));
-  document.getElementById('mateCount').textContent = String(tsMates.length);
-  document.getElementById('oppCount').textContent = String(autoOpp ? 0 : tsOpps.length);
-
-  const youLabel = tsYou ? rosterById(tsYou).name : (document.getElementById('youNameInput').value.trim() || 'nog niet gekozen');
-  const mateLabel = tsMates.length ? tsMates.map((id) => rosterById(id).name).join(', ') : 'automatisch aangevuld';
-  const oppLabel = autoOpp ? 'automatisch' : (tsOpps.length ? tsOpps.map((id) => rosterById(id).name).join(', ') : 'automatisch aangevuld');
-  document.getElementById('tsSummary').innerHTML =
-    `Jij: <b>${youLabel}</b> &middot; Team: <b>${mateLabel}</b> &middot; Tegenstander: <b>${oppLabel}</b>`;
 }
 
-document.querySelectorAll('.mode-btn').forEach((btn) => {
-  btn.addEventListener('click', () => { tsMode = btn.dataset.mode; renderRoster(); });
-});
-document.getElementById('youNameInput').addEventListener('input', (e) => {
-  if (e.target.value.trim()) tsYou = null;
-  renderRoster();
-});
-document.getElementById('autoOppCheck').addEventListener('change', (e) => {
-  if (e.target.checked) tsOpps = [];
-  renderRoster();
-});
+function mountStep() {
+  const meta = STEP_META[tsStep - 1];
+  document.getElementById('tsProgress').textContent = `STAP ${tsStep} VAN 3`;
+  document.getElementById('tsStepTitle').textContent = meta.title;
+  document.getElementById('tsStepSub').textContent = meta.sub;
+
+  const slotsBox = document.getElementById('tsSlots');
+  slotsBox.innerHTML = '';
+  tsSlotInputEls = currentSlots().map((slot, i) => {
+    const input = document.createElement('input');
+    input.className = 'ts-slot-input';
+    input.type = 'text';
+    input.maxLength = 16;
+    input.autocomplete = 'off';
+    input.placeholder = meta.placeholders[i];
+    input.value = slot.name;
+    input.addEventListener('input', (e) => {
+      slot.rosterId = null;
+      slot.name = e.target.value;
+      input.classList.toggle('filled', slot.name.trim().length > 0);
+      updateGridHighlight();
+      updateSummary();
+      updateNextButton();
+    });
+    slotsBox.appendChild(input);
+    return input;
+  });
+
+  mountRosterGrid();
+  updateGridHighlight();
+  updateSummary();
+  updateNextButton();
+
+  document.getElementById('btnTsBack').textContent = tsStep === 1 ? 'Terug' : 'Vorige';
+  document.getElementById('btnTsNext').textContent = tsStep === 3 ? 'Start wedstrijd' : 'Volgende';
+}
+
 document.getElementById('btnTsBack').addEventListener('click', () => {
+  if (tsStep > 1) { tsStep--; mountStep(); return; }
   HUD.hideTeamSelect();
   HUD.showOverlay();
 });
-
-function shuffled(arr) {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-function pickRandomUnused(excludeIds, count) {
-  const excl = new Set(excludeIds.filter(Boolean));
-  return shuffled(ROSTER.filter((r) => !excl.has(r.id))).slice(0, count).map((r) => r.id);
-}
+document.getElementById('btnTsNext').addEventListener('click', () => {
+  if (!stepValid()) return;
+  if (tsStep < 3) { tsStep++; mountStep(); return; }
+  startMatchFromSelection();
+});
 
 function startMatchFromSelection() {
-  const nameInput = document.getElementById('youNameInput').value.trim();
-  const youAppearance = tsYou ? rosterById(tsYou) : DEFAULT_APPEARANCE;
-  const youName = tsYou ? rosterById(tsYou).name : (nameInput || 'Jij');
+  const slotAppearance = (slot) => slot.rosterId
+    ? { ...rosterById(slot.rosterId), name: slot.name.trim() || rosterById(slot.rosterId).name }
+    : { ...DEFAULT_APPEARANCE, name: slot.name.trim() || 'Speler' };
 
-  let mateIds = tsMates.slice();
-  if (mateIds.length < 2) {
-    mateIds = mateIds.concat(pickRandomUnused([tsYou, ...mateIds, ...tsOpps], 2 - mateIds.length));
-  }
+  const you = slotAppearance(tsSlots[0][0]);
+  const mates = tsSlots[1].map(slotAppearance);
+  const opps = tsSlots[2].map(slotAppearance);
 
-  const autoOpp = document.getElementById('autoOppCheck').checked;
-  let oppIds = autoOpp ? [] : tsOpps.slice();
-  if (autoOpp || oppIds.length < 3) {
-    oppIds = oppIds.concat(pickRandomUnused([tsYou, ...mateIds, ...oppIds], 3 - oppIds.length));
-  }
-
-  const mateA = mateIds.map(rosterById);
-  const oppA = oppIds.map(rosterById);
-
-  teamA[0].applyAppearance(mateA[0]);
-  teamA[1].applyAppearance({ ...youAppearance, name: youName });
-  teamA[2].applyAppearance(mateA[1]);
-  teamB[0].applyAppearance(oppA[0]);
-  teamB[1].applyAppearance(oppA[1]);
-  teamB[2].applyAppearance(oppA[2]);
+  teamA[0].applyAppearance(mates[0]);
+  teamA[1].applyAppearance(you);
+  teamA[2].applyAppearance(mates[1]);
+  teamB[0].applyAppearance(opps[0]);
+  teamB[1].applyAppearance(opps[1]);
+  teamB[2].applyAppearance(opps[2]);
 
   for (const p of teamA) p.isHuman = false;
   teamA[1].isHuman = true;
   humanIndex = 1;
 
-  HUD.setTeamLabels(`TEAM ${youName}`.toUpperCase(), 'TEGENSTANDER');
+  HUD.setTeamLabels(`TEAM ${you.name}`.toUpperCase(), 'TEGENSTANDER');
 
   HUD.hideTeamSelect();
   Audio.playKick();
@@ -619,9 +648,14 @@ function startMatchFromSelection() {
 document.getElementById('startBtn').addEventListener('click', () => {
   HUD.hideOverlay();
   HUD.showTeamSelect();
-  renderRoster();
+  tsStep = 1;
+  tsSlots = [
+    [{ rosterId: null, name: '' }],
+    [{ rosterId: null, name: '' }, { rosterId: null, name: '' }],
+    [{ rosterId: null, name: '' }, { rosterId: null, name: '' }, { rosterId: null, name: '' }],
+  ];
+  mountStep();
 });
-document.getElementById('btnStartMatch').addEventListener('click', startMatchFromSelection);
 
 document.getElementById('btnRematch').addEventListener('click', () => {
   HUD.hideGameOver();

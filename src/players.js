@@ -210,12 +210,12 @@ export class Player {
     const makeLeg = (side) => {
       const hip = new THREE.Group();
       hip.position.set(side * 0.11, 0.9, 0);
-      const thigh = segment(0.4, 0.075, shortsMat);
+      const thigh = segment(0.27, 0.075, shortsMat);
       hip.add(thigh);
       const knee = new THREE.Group();
       knee.position.y = thigh.userData.tipY;
       knee.rotation.x = -0.08;
-      const shin = segment(0.4, 0.06, skinMat);
+      const shin = segment(0.27, 0.06, skinMat);
       knee.add(shin);
       // rounded shoe (no more box): capsule sole + toe cap
       const shoe = new THREE.Group();

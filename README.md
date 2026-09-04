@@ -34,7 +34,6 @@ automatically when the match starts.
 - **WASD** (or arrow keys) — move your player
 - **Mouse** — aim; the ring on the ground shows where your shot will land
 - **Left mouse button** (or Space) — hold to charge power, release to hit/serve
-- **Shift** — serve from the hand instead of the ground
 - **Right-click** (or Q) — switch which of your 3 players you control
 - Keyboard-only fallback: left/right picks a corner, up/down + charge picks depth
 
