@@ -14,18 +14,41 @@ const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
 app.prepend(renderer.domElement);
+
+// A click during play is a shot, not a page interaction. Mouse input is bound
+// to the canvas (see Input.bindMouse below) so menu clicks never count; here we
+// just suppress selection/context-menu and give an aiming cursor.
+renderer.domElement.style.touchAction = 'none';
+renderer.domElement.style.cursor = 'crosshair';
+document.body.style.userSelect = 'none';
+Input.bindMouse(renderer.domElement);
 
 const scene = new THREE.Scene();
 buildCourt(scene);
 
-const hemi = new THREE.HemisphereLight(0xf4f6f2, 0x6b7a52, 1.0);
+const hemi = new THREE.HemisphereLight(0xeaf1ff, 0x5f6b4a, 0.85);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xffffff, 0.55);
-sun.position.set(6, 12, -6);
+
+const sun = new THREE.DirectionalLight(0xfff0d8, 2.0);
+sun.position.set(9, 14, -7);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.02;
+const sc = sun.shadow.camera;
+sc.near = 1; sc.far = 48;
+sc.left = -18; sc.right = 18; sc.top = 18; sc.bottom = -18;
+sc.updateProjectionMatrix();
 scene.add(sun);
-const fill = new THREE.DirectionalLight(0xcfe0ff, 0.25);
-fill.position.set(-8, 6, 8);
+scene.add(sun.target);
+
+const fill = new THREE.DirectionalLight(0xcfe0ff, 0.35);
+fill.position.set(-9, 7, 9);
 scene.add(fill);
 
 const camera = createCamera(window.innerWidth / window.innerHeight);
@@ -41,9 +64,75 @@ function switchHuman(newIndex) {
   humanIndex = newIndex;
 }
 
+// ---- Mouse aiming: project the cursor onto the ground and preview the shot ----
+const raycaster = new THREE.Raycaster();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _aimHit = new THREE.Vector3();
+
+const reticle = new THREE.Mesh(
+  new THREE.RingGeometry(0.32, 0.5, 28),
+  new THREE.MeshBasicMaterial({ color: 0xffe37a, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
+);
+reticle.rotation.x = -Math.PI / 2;
+reticle.position.y = 0.03;
+reticle.visible = false;
+scene.add(reticle);
+
+const landMark = new THREE.Mesh(
+  new THREE.RingGeometry(0.26, 0.4, 24),
+  new THREE.MeshBasicMaterial({ color: 0x8fd6ff, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
+);
+landMark.rotation.x = -Math.PI / 2;
+landMark.position.y = 0.028;
+landMark.visible = false;
+scene.add(landMark);
+
+function mouseAimPoint() {
+  raycaster.setFromCamera(Input.mouseNDC(), camera);
+  return raycaster.ray.intersectPlane(groundPlane, _aimHit) ? _aimHit : null;
+}
+function clampToOpponent(pt, isServe) {
+  const halfW = COURT.halfWidth;
+  const x = THREE.MathUtils.clamp(pt.x, -(halfW - 0.4), halfW - 0.4);
+  const zMin = isServe ? 0.9 : 0.6;
+  const zMax = COURT.depth - (isServe ? 0.9 : 0.35);
+  const z = THREE.MathUtils.clamp(Math.abs(pt.z), zMin, zMax); // opponent side is +z for team A
+  return new THREE.Vector3(x, 0, z);
+}
+function predictLanding() {
+  let x = ball.position.x, y = ball.position.y, z = ball.position.z;
+  let vx = ball.velocity.x, vy = ball.velocity.y, vz = ball.velocity.z;
+  const g = -13.5, h = 1 / 60;
+  for (let i = 0; i < 240; i++) {
+    vy += g * h; x += vx * h; y += vy * h; z += vz * h;
+    if (y <= 0.12 && vy < 0) return { x, z };
+  }
+  return { x, z };
+}
+function nearestIndexToX(x) {
+  let bi = 0, bd = Infinity;
+  for (let i = 0; i < teamA.length; i++) {
+    const d = Math.abs(teamA[i].group.position.x - x);
+    if (d < bd) { bd = d; bi = i; }
+  }
+  return bi;
+}
+function nearestIndexToBall() {
+  let bi = 0, bd = Infinity;
+  for (let i = 0; i < teamA.length; i++) {
+    const d = Math.hypot(teamA[i].group.position.x - ball.position.x, teamA[i].group.position.z - ball.position.z);
+    if (d < bd) { bd = d; bi = i; }
+  }
+  return bi;
+}
+
 const REACH = 0.75;
-const MAX_HIT_HEIGHT = 2.35;
+const HIT_RANGE = 1.35;   // generous contact range (ball magnet reaches this far)
+const MAX_HIT_HEIGHT = 2.6;
+const MAX_CHARGE = 0.7; // seconds to reach full power
+let spaceCharge = 0;
 let gameStarted = false;
+let decidingMatch = false;
 let hedgeRestTimer = 0;
 let prevTotalScore = 0;
 let serveCountdown = 0;
@@ -60,16 +149,22 @@ const match = new HegbalMatch({
     HUD.showBanner(text, duration);
     if (text) Audio.playWhistle();
   },
+  onPoint(team, reason) {
+    HUD.showPointBanner(reason, team === 'A' ? 'Punt voor jullie' : 'Punt voor de tegenstander');
+    Audio.playWhistle();
+  },
   onServe(team, rotationIndex, serveAttempt, matchRef) {
+    HUD.hidePointBanner();
     const idx = team === 'A' ? humanIndex : rotationIndex;
     matchRef.currentServerIndex = idx;
     matchRef.serveReady = false;
     serveCountdown = 0.7;
     HUD.setServeIndicator(team);
     positionForNewPoint(team, idx);
-    HUD.showBanner(team === 'A' ? 'JOUW OPSLAG' : 'OPSLAG TEGENSTANDER', 1000);
+    HUD.showBanner(team === 'A' ? 'JULLIE OPSLAG' : 'OPSLAG TEGENSTANDER', 1000);
   },
   onServeRetake(team) {
+    HUD.hidePointBanner();
     match.serveReady = false;
     serveCountdown = 0.7;
     positionForNewPoint(team, match.currentServerIndex, true);
@@ -78,11 +173,29 @@ const match = new HegbalMatch({
     hedgeRestTimer = 0;
   },
   onMatchOver(winner) {
+    HUD.hidePointBanner();
     gameStarted = false;
-    const label = winner === 'A' ? 'Jouw team wint!' : 'De tegenstander wint!';
-    HUD.setMatchOverText(`${label}  (${match.score.A} - ${match.score.B})`);
-    HUD.setStartButtonLabel('Rematch');
-    HUD.showOverlay();
+    if (decidingMatch) {
+      decidingMatch = false;
+      const A = match.setsA;
+      const B = match.setsB;
+      // Tally before this deciding pot, to judge whether the decider overturned
+      // the expected winner.
+      const beforeA = winner === 'A' ? A - 1 : A;
+      const beforeB = winner === 'B' ? B - 1 : B;
+      // Only an upset (the decider's winner was trailing beforehand) is a
+      // contradiction worth flagging with "maar ...".
+      const upset = winner === 'A' ? beforeB > beforeA : beforeA > beforeB;
+      const wonBy = winner === 'A' ? 'jullie hebben' : 'de computer heeft';
+      const verdict = upset
+        ? `${A}-${B} in potjes, maar ${wonBy} de winnende pot gewonnen.`
+        : `${A}-${B} in potjes.`;
+      const title = winner === 'A' ? 'Jullie winnen!' : 'De computer wint';
+      HUD.showGameOver(title, `${A} - ${B}`, { label: 'Potjes deze pauze', verdict });
+    } else {
+      const label = winner === 'A' ? 'Jullie winnen!' : 'De tegenstander wint';
+      HUD.showGameOver(label, `${match.score.A} - ${match.score.B}`);
+    }
   },
 });
 
@@ -94,10 +207,11 @@ function positionForNewPoint(serverTeam, serverIdx, retakeOnly = false) {
   const servingTeam = serverTeam === 'A' ? teamA : teamB;
   const server = servingTeam[serverIdx];
   const sign = serverTeam === 'A' ? -1 : 1;
-  server.group.position.set(0, 0, sign * (COURT.serveLineZ + 0.4));
+  const serveZ = COURT.depth + 0.5; // on/behind the baseline, per the rules
+  server.group.position.set(0, 0, sign * serveZ);
   server.group.rotation.y = serverTeam === 'A' ? Math.PI : 0;
 
-  const ballZ = sign * (COURT.serveLineZ + 0.05);
+  const ballZ = sign * (serveZ - 0.15);
   ball.place(0, ball.radius, ballZ);
 }
 
@@ -108,37 +222,58 @@ function canPlayerTouch(team) {
   return ballSide === team && match.turnTeam === team;
 }
 
-function pickHumanTarget(player) {
-  const move = Input.moveVector();
-  const targetSideSign = player.team === 'A' ? 1 : -1;
-  const spread = 4.2;
-  const x = THREE.MathUtils.clamp(player.group.position.x + move.x * spread, -COURT.halfWidth + 0.4, COURT.halfWidth - 0.4);
-  let depth;
-  if (move.z > 0) depth = COURT.depth - 1.2; // Up: deep shot
-  else if (move.z < 0) depth = 1.3; // Down: short dink
-  else depth = 4.4;
-  const z = targetSideSign * depth;
-  return new THREE.Vector3(x, 0, z);
-}
-
-function pickPassTarget(player) {
-  // A soft set to a teammate, entirely on our own side — no hedge to clear.
+function pickPassTarget(player, aimTarget) {
+  // A soft set to a teammate on our own side. With the mouse, set toward the
+  // teammate nearest the reticle; on keyboard, left/right chooses; otherwise
+  // set to whoever is nearest the ball.
   const teammates = teamA.filter((p) => p !== player);
-  const mate = teammates[Math.floor(Math.random() * teammates.length)] || player;
-  const x = THREE.MathUtils.clamp(mate.homeSlot.x + (Math.random() - 0.5) * 1.5, -COURT.halfWidth + 0.5, COURT.halfWidth - 0.5);
-  const z = -(1.8 + Math.random() * 3.2);
+  let mate;
+  if (aimTarget) {
+    mate = teammates.reduce((a, b) =>
+      Math.abs(b.group.position.x - aimTarget.x) < Math.abs(a.group.position.x - aimTarget.x) ? b : a);
+  } else {
+    const move = Input.moveVector();
+    if (move.x > 0) mate = teammates.reduce((a, b) => (b.homeSlot.x > a.homeSlot.x ? b : a));
+    else if (move.x < 0) mate = teammates.reduce((a, b) => (b.homeSlot.x < a.homeSlot.x ? b : a));
+    else mate = teammates.reduce((a, b) =>
+      Math.abs(b.group.position.x - ball.position.x) < Math.abs(a.group.position.x - ball.position.x) ? b : a);
+  }
+  const x = THREE.MathUtils.clamp(mate.group.position.x + (Math.random() - 0.5) * 0.6, -COURT.halfWidth + 0.5, COURT.halfWidth - 0.5);
+  const z = -(1.6 + Math.random() * 2.4);
   return new THREE.Vector3(x, 0, z);
 }
 
-function humanHit(player, isServe) {
+function humanHit(player, isServe, power = 0.6, aimTarget = null) {
   const start = new THREE.Vector3(player.group.position.x, Math.max(ball.position.y, 0.2), player.group.position.z);
-  // The rules require passing to a teammate at least once before sending the
-  // ball back over the hedge, so the first touch of a possession is a set.
   const mustPassFirst = !isServe && (match.touchCount || 0) === 0;
-  const target = mustPassFirst ? pickPassTarget(player) : pickHumanTarget(player);
-  const apex = mustPassFirst ? 1.3 + Math.random() * 0.8
-    : COURT.hedge.height + (isServe ? 1.1 : 0.6 + Math.random() * 0.9);
+  const p = THREE.MathUtils.clamp(power, 0, 1);
+
+  let target, apex;
+  if (mustPassFirst) {
+    target = pickPassTarget(player, aimTarget);
+    apex = 1.25 + Math.random() * 0.5;
+  } else if (aimTarget) {
+    // Mouse: aim the exact spot; power controls loft/pace, not where it lands.
+    target = clampToOpponent(aimTarget, isServe);
+    apex = COURT.hedge.height + 0.4 + p * 1.3;
+  } else {
+    // Keyboard fallback: left/right = corner, up/down + power = depth & height.
+    const move = Input.moveVector();
+    const side = player.team === 'A' ? 1 : -1;
+    const halfW = COURT.halfWidth;
+    const up = move.z > 0 ? 1 : 0, down = move.z < 0 ? 1 : 0;
+    const dMin = isServe ? 1.8 : 1.4, dMax = COURT.depth - (isServe ? 1.0 : 0.5);
+    const depthFrac = THREE.MathUtils.clamp(p + 0.15 * up - 0.4 * down, 0, 1);
+    const depth = THREE.MathUtils.lerp(dMin, dMax, depthFrac);
+    const cornerX = halfW - (isServe ? 0.9 : 0.6);
+    const tx = THREE.MathUtils.clamp(move.x !== 0 ? Math.sign(move.x) * cornerX : 0, -(halfW - 0.4), halfW - 0.4);
+    target = new THREE.Vector3(tx, 0, side * depth);
+    apex = COURT.hedge.height + 0.45 + p * 1.5 + 0.4 * up - 0.25 * down;
+  }
+  apex = Math.max(apex, COURT.hedge.height + 0.4);
+
   const v = computeLaunchVelocity(start, target, apex);
+  if (!mustPassFirst) v.multiplyScalar(0.92 + p * 0.16); // fuller charge = more pace/carry
   ball.velocity.copy(v);
   ball.position.y = Math.max(ball.position.y, 0.25);
   player.triggerKick();
@@ -147,64 +282,102 @@ function humanHit(player, isServe) {
 }
 
 function handleHumanInput(dt) {
-  const player = teamA[humanIndex];
-  if (Input.wasPressed('KeyQ')) {
-    switchHuman((humanIndex + 1) % teamA.length);
-    return;
-  }
+  // Switching players is manual only: right-click picks the player nearest the
+  // ball, Q cycles through the three. No automatic switching.
+  if (Input.mouseWasPressed(2)) switchHuman(nearestIndexToBall());
+  if (Input.wasPressed('KeyQ')) switchHuman((humanIndex + 1) % teamA.length);
 
+  const usingMouse = Input.usingMouse();
+  const aimPt = usingMouse ? mouseAimPoint() : null;
+  const actionDown = Input.isDown('Space') || Input.isMouseDown(0);
+  const actionUp = Input.wasReleased('Space') || Input.mouseWasReleased(0);
+  if (actionDown) spaceCharge = Math.min(MAX_CHARGE, spaceCharge + dt);
+  const chargeFrac = spaceCharge / MAX_CHARGE;
+
+  const isServing = match.phase === 'serve' && match.serverTeam === 'A' && match.currentServerIndex === humanIndex;
+
+  const player = teamA[humanIndex];
+
+  // ---- Movement (WASD or arrows), independent of aiming ----
   const move = Input.moveVector();
   const dir = new THREE.Vector3(move.x, 0, move.z);
   if (dir.lengthSq() > 0) dir.normalize();
   player.velocity.set(dir.x * player.speed, 0, dir.z * player.speed);
-
-  const nextX = THREE.MathUtils.clamp(player.group.position.x + player.velocity.x * dt, -(COURT.halfWidth + 3), COURT.halfWidth + 3);
-  const nextZ = THREE.MathUtils.clamp(player.group.position.z + player.velocity.z * dt, -(COURT.depth + 3), -0.36);
-  player.group.position.x = nextX;
-  player.group.position.z = nextZ;
+  player.group.position.x = THREE.MathUtils.clamp(player.group.position.x + player.velocity.x * dt, -(COURT.halfWidth + 3), COURT.halfWidth + 3);
+  player.group.position.z = THREE.MathUtils.clamp(player.group.position.z + player.velocity.z * dt, -(COURT.depth + 3), -0.36);
   if (dir.lengthSq() > 0) {
     const angle = Math.atan2(dir.x, dir.z) + Math.PI;
     player.group.rotation.y = THREE.MathUtils.lerp(player.group.rotation.y, angle, 0.3);
   }
 
-  const isServing = match.phase === 'serve' && match.serverTeam === 'A' && match.currentServerIndex === humanIndex;
-  const spacePressed = Input.wasPressed('Space');
+  // ---- Reticle + incoming-landing marker ----
+  const aimActive = usingMouse && aimPt && (isServing || (match.phase === 'rally' && canPlayerTouch('A')));
+  if (aimActive) {
+    const prev = clampToOpponent(aimPt, isServing);
+    reticle.position.set(prev.x, 0.03, prev.z);
+    reticle.visible = true;
+  } else {
+    reticle.visible = false;
+  }
+  if (match.phase === 'rally' && ball.velocity.z < -0.1) {
+    const pr = predictLanding();
+    if (pr.z < 0.2) { landMark.position.set(pr.x, 0.028, pr.z); landMark.visible = true; }
+    else landMark.visible = false;
+  } else {
+    landMark.visible = false;
+  }
 
+  // ---- Serve ----
   if (isServing) {
-    const alreadyStruck = match.serveStruck;
-    HUD.setActiveHint(alreadyStruck ? '' : Math.abs(player.group.position.z) >= COURT.serveLineZ
-      ? 'Spatie: opslag vanaf de grond | Shift+Spatie: vanuit de hand'
-      : 'Ga achter de opslaglijn staan!');
-    if (spacePressed && !alreadyStruck) {
-      if (Math.abs(player.group.position.z) < COURT.serveLineZ) {
+    const behindLine = Math.abs(player.group.position.z) >= COURT.depth - 0.1;
+    HUD.setActiveHint(match.serveStruck ? '' : behindLine
+      ? 'Muis richt | linkermuis of Spatie: vasthouden voor kracht, loslaten om te slaan | Shift = uit de hand'
+      : 'Ga achter de achterlijn staan!');
+    HUD.setPower(chargeFrac, !match.serveStruck && behindLine && actionDown);
+    if (actionUp && !match.serveStruck) {
+      if (!behindLine) {
         HUD.showBanner('GA ACHTER DE LIJN STAAN', 700);
       } else {
-        if (Input.isDown('ShiftLeft') || Input.isDown('ShiftRight')) {
-          ball.position.y = 1.1; // struck straight from the hand
-        }
+        if (Input.isDown('ShiftLeft') || Input.isDown('ShiftRight')) ball.position.y = 1.1;
         match.serveStruck = true;
-        humanHit(player, true);
+        humanHit(player, true, chargeFrac, aimPt ? aimPt.clone() : null);
       }
+      spaceCharge = 0;
+      HUD.setPower(0, false);
     }
     return;
   }
 
+  // ---- Rally ----
   if (match.phase === 'rally') {
     const dx = ball.position.x - player.group.position.x;
     const dz = ball.position.z - player.group.position.z;
     const dist = Math.hypot(dx, dz);
     const canTouch = canPlayerTouch('A');
     const willPass = (match.touchCount || 0) === 0;
-    HUD.setActiveHint(canTouch && dist < REACH + 0.5
-      ? (willPass ? 'Spatie: overspelen naar teamgenoot' : 'Spatie: speel de bal over de heg')
+    const inReach = canTouch && dist < HIT_RANGE && ball.position.y < MAX_HIT_HEIGHT && (player.hitCooldown || 0) <= 0;
+    HUD.setActiveHint(canTouch && dist < HIT_RANGE + 0.6
+      ? (willPass ? 'Set naar teamgenoot (muis of links/rechts kiest wie)' : 'Muis richt | linkermuis/Spatie vasthouden voor kracht, loslaten om te slaan')
       : '');
-    if (spacePressed && canTouch && dist < REACH && ball.position.y < MAX_HIT_HEIGHT && (player.hitCooldown || 0) <= 0) {
-      humanHit(player, false);
-      match.recordTouch('A', player);
-      player.hitCooldown = 0.5;
+    HUD.setPower(chargeFrac, actionDown && inReach && !willPass);
+    if (actionUp) {
+      if (inReach) {
+        // Ball magnet: lunge onto the ball so contact feels reliable.
+        if (dist > 0.4) {
+          const step = Math.min(0.75, dist - 0.3);
+          player.group.position.x += (dx / dist) * step;
+          player.group.position.z = THREE.MathUtils.clamp(player.group.position.z + (dz / dist) * step, -(COURT.depth + 3), -0.36);
+        }
+        humanHit(player, false, chargeFrac, aimPt ? aimPt.clone() : null);
+        match.recordTouch('A', player);
+        player.hitCooldown = 0.5;
+      }
+      spaceCharge = 0;
+      HUD.setPower(0, false);
     }
   } else {
     HUD.setActiveHint('');
+    if (actionUp) { spaceCharge = 0; HUD.setPower(0, false); }
   }
 }
 
@@ -279,6 +452,8 @@ function animate() {
     }
   } else {
     for (const p of [...teamA, ...teamB]) p.update(dt);
+    reticle.visible = false;
+    landMark.visible = false;
   }
 
   updateCamera(camera, ball, dt);
@@ -305,7 +480,35 @@ document.getElementById('startBtn').addEventListener('click', () => {
   Audio.playKick();
   if (matchesPlayed > 0) match.rematch();
   matchesPlayed++;
+  decidingMatch = false;
+  Input.clearFrame(); // drop the starting click so it isn't read as a serve
   gameStarted = true;
+});
+
+document.getElementById('btnRematch').addEventListener('click', () => {
+  HUD.hideGameOver();
+  Audio.playKick();
+  match.rematch();
+  matchesPlayed++;
+  decidingMatch = false;
+  Input.clearFrame();
+  gameStarted = true;
+});
+
+document.getElementById('btnDecider').addEventListener('click', () => {
+  HUD.hideGameOver();
+  Audio.playKick();
+  match.rematch();
+  matchesPlayed++;
+  decidingMatch = true;
+  Input.clearFrame();
+  gameStarted = true;
+  HUD.showBanner('WINNENDE POTJE!', 1600);
+});
+
+document.getElementById('btnToMenu').addEventListener('click', () => {
+  HUD.hideGameOver();
+  HUD.showOverlay();
 });
 
 HUD.hideLoading();

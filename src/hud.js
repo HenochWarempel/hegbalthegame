@@ -32,6 +32,46 @@ export function setActiveHint(text) {
   el('activeHint').textContent = text;
 }
 
+export function showPointBanner(main, sub) {
+  const box = el('pointBanner');
+  if (!box) return;
+  el('pointMain').textContent = main || '';
+  el('pointSub').textContent = sub || '';
+  box.classList.add('show');
+}
+
+export function hidePointBanner() {
+  const box = el('pointBanner');
+  if (box) box.classList.remove('show');
+}
+
+export function showGameOver(title, scoreText, opts = {}) {
+  el('gameoverTitle').textContent = title || '';
+  el('finalScoreLabel').textContent = opts.label || 'Eindstand';
+  el('finalScore').textContent = scoreText || '';
+  const verdict = el('gameoverVerdict');
+  if (opts.verdict) {
+    verdict.textContent = opts.verdict;
+    verdict.classList.remove('hidden');
+  } else {
+    verdict.textContent = '';
+    verdict.classList.add('hidden');
+  }
+  el('gameover').classList.remove('hidden');
+}
+
+export function hideGameOver() {
+  el('gameover').classList.add('hidden');
+}
+
+export function setPower(frac, visible) {
+  const bar = el('powerbar');
+  if (!bar) return;
+  bar.classList.toggle('show', !!visible);
+  const w = Math.max(0, Math.min(1, frac || 0)) * 100;
+  el('powerfill').style.width = w + '%';
+}
+
 export function showOverlay() { el('overlay').classList.remove('hidden'); }
 export function hideOverlay() { el('overlay').classList.add('hidden'); }
 export function hideLoading() { el('loading').style.display = 'none'; }

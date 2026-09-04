@@ -29,6 +29,25 @@
   .serve-dot { width: 10px; height: 10px; border-radius: 50%; background: #ffd54a; box-shadow: 0 0 6px #ffd54a; margin-top: 4px; visibility: hidden; }
   .serve-dot.show { visibility: visible; }
 
+  .titlerow { display: flex; align-items: center; justify-content: center; gap: 20px; }
+  #logo { height: 72px; width: auto; filter: drop-shadow(0 6px 14px rgba(0,0,0,.5)); }
+  @media (max-width: 620px){ #logo { height: 48px; } }
+
+  #pointBanner {
+    position: absolute; left: 0; right: 0; top: 33%;
+    text-align: center; pointer-events: none;
+    opacity: 0; transition: opacity 0.25s ease;
+  }
+  #pointBanner.show { opacity: 1; }
+  #pointMain {
+    font-size: clamp(30px, 6.2vw, 72px); font-weight: 900; letter-spacing: 1px; line-height: 1.05;
+    color: #ffffff; text-shadow: 0 5px 22px rgba(0,0,0,.75), 0 2px 5px rgba(0,0,0,.9);
+  }
+  #pointSub {
+    margin-top: 8px; font-size: clamp(15px, 2.6vw, 26px); font-weight: 800;
+    color: #ffe37a; text-shadow: 0 2px 10px rgba(0,0,0,.85);
+  }
+
   #banner {
     position: absolute; top: 96px; left: 50%; transform: translateX(-50%);
     font-size: 30px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase;
@@ -54,6 +73,8 @@
     z-index: 20;
   }
   #overlay.hidden { display: none; }
+  .titlerow { display: flex; align-items: center; justify-content: center; gap: 20px; }
+  #logo { height: 72px; width: auto; filter: drop-shadow(0 6px 14px rgba(0,0,0,.5)); }
   #overlay h1 {
     font-size: 72px; margin: 0; letter-spacing: 8px; font-weight: 900;
     background: linear-gradient(180deg, #fff9dd, #ffd54a 60%, #b8860b);
@@ -85,6 +106,44 @@
   #overlay .rules ul { margin: 4px 0 0 18px; padding: 0; }
 
   #matchOver { font-size: 22px; margin-top: 6px; color: #ffe37a; min-height: 28px; }
+
+  #gameover {
+    position: absolute; inset: 0; z-index: 30;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; text-align: center; color: #fff;
+    background: radial-gradient(ellipse at center, rgba(10,26,16,.86), rgba(6,16,10,.94));
+  }
+  #gameover.hidden { display: none; }
+  #gameoverTitle { font-size: clamp(24px, 4.6vw, 46px); font-weight: 800; color: #ffe37a; letter-spacing: 1px; }
+  #finalScoreLabel { font-size: 13px; letter-spacing: 4px; opacity: .65; text-transform: uppercase; margin-top: 16px; }
+  #finalScore { font-size: clamp(64px, 15vw, 168px); font-weight: 900; line-height: 1; text-shadow: 0 8px 30px rgba(0,0,0,.6); }
+  #gameoverVerdict { margin-top: 14px; max-width: 620px; font-size: clamp(16px, 2.6vw, 22px); font-weight: 700; color: #ffe37a; line-height: 1.35; }
+  #gameoverVerdict.hidden { display: none; }
+  #gameoverButtons { display: flex; flex-direction: column; gap: 14px; align-items: center; margin-top: 30px; }
+  #gameoverButtons .go-row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  #btnRematch {
+    font-size: 22px; padding: 15px 40px; border: none; border-radius: 12px; cursor: pointer;
+    background: #ffcf33; color: #222; font-weight: 800; letter-spacing: .5px; box-shadow: 0 6px 0 #a97c14;
+  }
+  #btnRematch:hover { filter: brightness(1.08); }
+  #btnRematch:active { transform: translateY(4px); box-shadow: 0 2px 0 #a97c14; }
+  #btnToMenu {
+    font-size: 15px; padding: 12px 22px; border-radius: 10px; cursor: pointer;
+    background: transparent; border: 2px solid rgba(255,255,255,.4); color: #cdd6cf; font-weight: 600;
+  }
+  #btnToMenu:hover { border-color: #fff; color: #fff; }
+  #btnDecider {
+    font-size: 14px; padding: 9px 18px; border-radius: 9px; cursor: pointer;
+    background: transparent; border: 1px solid rgba(255,227,122,.55); color: #ffe37a; font-weight: 700; letter-spacing: .5px;
+  }
+  #btnDecider:hover { border-color: #ffe37a; background: rgba(255,227,122,.12); }
+  #powerbar {
+    position: absolute; bottom: 44px; right: 12px; width: 170px; height: 13px;
+    background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.55); border-radius: 8px;
+    overflow: hidden; opacity: 0; transition: opacity .1s ease;
+  }
+  #powerbar.show { opacity: 1; }
+  #powerfill { width: 0%; height: 100%; background: linear-gradient(90deg,#7ee37a,#ffe37a 55%,#ff6a3d); }
   #loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; letter-spacing:3px; z-index: 30; background:#0e1f0e; }
 </style>
 </head>
@@ -93,8 +152,11 @@
   <div id="loading">HEGBAL WORDT GELADEN&hellip;</div>
 
   <div id="overlay" class="hidden">
-    <h1>HEGBAL</h1>
-    <div class="sub">Parkeerplaats Kampioenschap</div>
+    <div class="titlerow">
+      <h1>HEGBAL</h1>
+      <img id="logo" src="https://www.hegbal.nl/app/themes/sage10/public/build/assets/Hegbal-logo-fGw8hnRD.svg" alt="Hegbal logo" onerror="this.style.display='none'" />
+    </div>
+    <div class="sub">VOOR AUFSCHLICKSERS EN ECKESCHÄFFTERS</div>
     <div class="diff-select" id="diffSelect">
       <button class="diff-btn" data-diff="easy">Makkelijk</button>
       <button class="diff-btn active" data-diff="medium">Gemiddeld</button>
@@ -127,15 +189,29 @@
     <div id="matchOver"></div>
   </div>
 
+  <div id="gameover" class="hidden">
+    <div id="gameoverTitle"></div>
+    <div id="finalScoreLabel">Eindstand</div>
+    <div id="finalScore"></div>
+    <div id="gameoverVerdict" class="hidden"></div>
+    <div id="gameoverButtons">
+      <div class="go-row">
+        <button id="btnRematch">Rematch</button>
+        <button id="btnToMenu">Naar startscherm</button>
+      </div>
+      <button id="btnDecider">Winnende potje</button>
+    </div>
+  </div>
+
   <div id="hud">
     <div id="scoreboard">
       <div class="sb-team blue">
-        <div class="sb-name" id="teamAName">JOUW TEAM</div>
+        <div class="sb-name" id="teamAName">JULLIE TEAM</div>
         <div class="sb-score" id="teamAScore">0</div>
         <div class="serve-dot" id="serveDotA"></div>
       </div>
       <div class="sb-mid">
-        <div class="games" id="setsLabel">SETS</div>
+        <div class="games" id="setsLabel">POTJES</div>
         <div class="setnum"><span id="setsA">0</span> - <span id="setsB">0</span></div>
       </div>
       <div class="sb-team red">
@@ -145,12 +221,14 @@
       </div>
     </div>
     <div id="banner"></div>
+    <div id="pointBanner"><div id="pointMain"></div><div id="pointSub"></div></div>
     <div id="controlsHint">
-      <b>Pijltjes</b> bewegen &middot; <b>Spatie</b> raak bal / opslag<br/>
-      <b>Shift+Spatie</b> opslag vanuit de hand &middot; <b>Q</b> wissel speler<br/>
-      Richt met <b>links/rechts</b> vlak voor het raken van de bal
+      <b>WASD</b> bewegen &middot; <b>Muis</b> richt (ring = waar je shot landt)<br/>
+      <b>Linkermuis</b> vasthouden laadt kracht, loslaten slaat &middot; <b>Rechtermuis</b> wissel speler<br/>
+      <b>Shift</b> = opslag uit de hand &middot; toetsenbord kan ook: <b>Spatie</b> + pijltjes
     </div>
     <div id="activeHint"></div>
+    <div id="powerbar"><div id="powerfill"></div></div>
   </div>
 </div>
 <script type="importmap">

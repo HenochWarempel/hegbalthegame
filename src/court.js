@@ -6,7 +6,9 @@ import { makePaverTexture, makeGrassTexture, makeHedgeTexture, makeSkyTexture, m
 export const COURT = {
   width: 12,          // playable width, x in [-6, 6]
   halfWidth: 6,
-  depth: 9,           // each team's playable depth, z in [0.35, 9] / [-9, -0.35]
+  depth: 9,           // each team's playable depth (far red line / baseline)
+  lineNear: 0.36,     // near red line, along the hedge
+  lineTol: 0.12,      // ~ball radius: a ball touching a line still counts in
   serveLineZ: 6.2,    // server must stand at |z| >= this
   hedge: {
     height: 1.3,
@@ -61,6 +63,7 @@ function makeHouse(x, z, hue) {
 
   group.position.set(x, 0, z);
   group.rotation.y = (Math.random() - 0.5) * 0.3;
+  group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return group;
 }
 
@@ -80,6 +83,7 @@ function makeTree(scale = 1) {
     blob.rotation.set(Math.random(), Math.random(), Math.random());
     group.add(blob);
   }
+  group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return group;
 }
 
@@ -93,6 +97,7 @@ function makeBushCluster(count = 5, spread = 1.6, scale = 1) {
     b.rotation.set(Math.random(), Math.random(), Math.random());
     group.add(b);
   }
+  group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return group;
 }
 
@@ -124,6 +129,7 @@ function makeStreetlight() {
   glow.position.set(1.05, 5.38, 0);
   group.add(glow);
 
+  group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return group;
 }
 
@@ -155,6 +161,7 @@ function makeCar() {
   const tailLight2 = tailLight.clone();
   tailLight2.position.x = -0.7;
   group.add(tailLight2);
+  group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return group;
 }
 
@@ -184,6 +191,7 @@ export function buildCourt(scene) {
   );
   grass.rotation.x = -Math.PI / 2;
   grass.position.y = -0.01;
+  grass.receiveShadow = true;
   scene.add(grass);
 
   // Paved parking lot area on Team A's (near) side.
@@ -194,27 +202,34 @@ export function buildCourt(scene) {
   );
   pavers.rotation.x = -Math.PI / 2;
   pavers.position.set(0, 0.005, -(paverD / 2 - 0.4));
+  pavers.receiveShadow = true;
   scene.add(pavers);
 
-  // Painted court lines (baseline + serve line) on the pavement.
-  const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2f2ea });
+  // Painted court lines: bright red and clearly visible on grass and pavement.
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0xe11d2a });
+  const LINE_W = 0.18;
   function makeLine(len, x, z, rotY = 0) {
-    const line = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.08), lineMat);
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(len, LINE_W), lineMat);
     line.rotation.x = -Math.PI / 2;
     line.rotation.z = rotY;
-    line.position.set(x, 0.012, z);
+    line.position.set(x, 0.02, z);
     scene.add(line);
   }
-  makeLine(COURT.width, 0, -COURT.serveLineZ);
-  makeLine(COURT.width, 0, -0.36);
-  makeLine(COURT.depth - 0.36, -COURT.halfWidth, -(COURT.depth + 0.36) / 2, Math.PI / 2);
-  makeLine(COURT.depth - 0.36, COURT.halfWidth, -(COURT.depth + 0.36) / 2, Math.PI / 2);
-
-  // Mirror the same markings onto Team B's grass side beyond the hedge.
-  makeLine(COURT.width, 0, COURT.serveLineZ);
-  makeLine(COURT.width, 0, 0.36);
-  makeLine(COURT.depth - 0.36, -COURT.halfWidth, (COURT.depth + 0.36) / 2, Math.PI / 2);
-  makeLine(COURT.depth - 0.36, COURT.halfWidth, (COURT.depth + 0.36) / 2, Math.PI / 2);
+  // A clean, closed, identical rectangle on each side of the hedge. Both boxes
+  // are exactly COURT.width wide and (COURT.depth - zNear) deep, capped by a
+  // baseline, so no lines run on past the field.
+  const zNear = COURT.lineNear;
+  const zFar = COURT.depth;
+  const sideLen = zFar - zNear;
+  const sideMid = (zFar + zNear) / 2;
+  function courtBox(sign) {
+    makeLine(COURT.width, 0, sign * zNear);                       // along the hedge
+    makeLine(COURT.width, 0, sign * zFar);                        // baseline
+    makeLine(sideLen, -COURT.halfWidth, sign * sideMid, Math.PI / 2);
+    makeLine(sideLen, COURT.halfWidth, sign * sideMid, Math.PI / 2);
+  }
+  courtBox(-1); // Team A (near)
+  courtBox(1);  // Team B (far)
 
   // Hedge "net" across the middle.
   const hedgeGroup = new THREE.Group();
@@ -236,6 +251,7 @@ export function buildCourt(scene) {
     );
     hedgeGroup.add(blob);
   }
+  hedgeGroup.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   scene.add(hedgeGroup);
 
   // Wooden fence posts + wire along the far left boundary, like the photo.
@@ -275,6 +291,17 @@ export function buildCourt(scene) {
   for (const [x, z] of housePositions) {
     const h = makeHouse(x, z, houseHues[Math.floor(Math.random() * houseHues.length)]);
     scene.add(h);
+  }
+
+  // Foreground bushes right beside the court, framing the near side.
+  const sideBushSpots = [
+    [-7.0, -1.6], [-7.3, -4.8], [-6.9, -7.6],
+    [7.0, -1.2], [7.4, -4.4], [7.1, -7.8],
+  ];
+  for (const [bx, bz] of sideBushSpots) {
+    const bush = makeBushCluster(7, 1.9, 1.1 + Math.random() * 0.5);
+    bush.position.set(bx, 0, bz);
+    scene.add(bush);
   }
 
   // Streetlight beside the court, echoing the photo composition.
@@ -320,5 +347,6 @@ function makeSpectator(shirtColor) {
   const legs = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.13, 0.7, 8), new THREE.MeshLambertMaterial({ color: 0x2c2f38 }));
   legs.position.y = 0.35;
   group.add(legs);
+  group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return group;
 }

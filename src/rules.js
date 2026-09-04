@@ -47,16 +47,22 @@ export class HegbalMatch {
   }
 
   isInBounds(x, z) {
-    const withinWidth = Math.abs(x) <= COURT.halfWidth + 0.05;
-    const edge = COURT.hedge.halfThickness + 0.1;
-    const withinDepth = Math.abs(z) >= edge && Math.abs(z) <= COURT.depth + 0.4;
+    // Exactly the painted red rectangle, with a ball-radius tolerance so a ball
+    // touching a line still counts in. Uses the same COURT values the lines are
+    // drawn from, so the visual and the in/out call always agree.
+    const R = COURT.lineTol;
+    const withinWidth = Math.abs(x) <= COURT.halfWidth + R;
+    const withinDepth = Math.abs(z) >= COURT.lineNear - R && Math.abs(z) <= COURT.depth + R;
     return withinWidth && withinDepth;
   }
 
   awardPoint(scoringTeam, reason) {
     this.score[scoringTeam]++;
     this.hooks.onScore(this.score, this.setsA, this.setsB);
-    if (reason) this.hooks.onBanner(reason, 1300);
+    if (reason) {
+      if (this.hooks.onPoint) this.hooks.onPoint(scoringTeam, reason);
+      else this.hooks.onBanner(reason, 1600);
+    }
 
     const leader = this.score[scoringTeam];
     const trailer = this.score[other(scoringTeam)];
@@ -73,7 +79,7 @@ export class HegbalMatch {
     this.lastServer = nextServer;
     setTimeout(() => {
       if (this.phase !== 'over') this.beginServeSequence(nextServer);
-    }, 900);
+    }, 1600);
     this.phase = 'idle';
   }
 
@@ -180,12 +186,12 @@ export class HegbalMatch {
         }
         if (ev.type === 'bounce') {
           if (ev.side === this.turnTeam) {
-            // The very first bounce of a turn — before the receiving side has
-            // touched the ball at all — is the crossing shot landing. That one
-            // must land inside the field; once they've played it at least
-            // once, further bounces during their own handling may go long.
-            const isReceptionBounce = (this.touchCount || 0) === 0;
-            if (isReceptionBounce && !this.isInBounds(ev.x, ev.z)) {
+            // The crossing shot's FIRST bounce on this side is the one that
+            // must land in. (After a serve the ball has already legally landed
+            // once, so bounceCount is 1 and this is skipped — a further bounce
+            // is then simply the receiver's second bounce, below.)
+            const firstBounceThisSide = (this.bounceCount || 0) === 0;
+            if (firstBounceThisSide && !this.isInBounds(ev.x, ev.z)) {
               // The sender put it out — the receiving team wins the point.
               this.faultRally(this.turnTeam, 'BUITEN HET VELD');
               return;

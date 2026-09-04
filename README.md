@@ -22,11 +22,12 @@ Then open `http://localhost:8000/`.
 
 ## Controls
 
-- **Arrow keys** — move your player
-- **Space** — hit the ball / serve
-- **Shift + Space** — serve from the hand instead of the ground
-- **Q** — switch which of your 3 players you control
-- Hold left/right while hitting to aim; up/down picks a deep or short shot
+- **WASD** (or arrow keys) — move your player
+- **Mouse** — aim; the ring on the ground shows where your shot will land
+- **Left mouse button** (or Space) — hold to charge power, release to hit/serve
+- **Shift** — serve from the hand instead of the ground
+- **Right-click** (or Q) — switch which of your 3 players you control
+- Keyboard-only fallback: left/right picks a corner, up/down + charge picks depth
 
 ## Rules implemented
 
@@ -35,12 +36,17 @@ Then open `http://localhost:8000/`.
   hedge but still lands in gets replayed once; a second clip, a clip that
   then goes out, or a serve that never clears the hedge is a fault —
   point and serve go to the other team.
-- **Rally**: each team may let the ball bounce once per turn (anywhere,
-  even off the pavement) before it must go back over the hedge; a second
-  bounce on the same side, or a shot that fails to clear the hedge, ends
-  the point.
+- **Rally**: a team must pass to a teammate at least once before sending
+  the ball back over the hedge — the first touch of a possession is always
+  a set, never a direct return. Once received, the ball may bounce once
+  per turn anywhere (even off the pavement); a second bounce, or a shot
+  that fails to clear the hedge, ends the point. The very first bounce of
+  a crossing shot (before the receiving team touches it) must land inside
+  the field, though — if it lands out, the sender is at fault.
 - **Match**: first to 5 points, win by 2. In a rematch, the team that
-  lost serves first.
+  lost serves first. After a match, you can also play a best-of-3 decider.
+- **Difficulty**: Makkelijk/Gemiddeld/Moeilijk tunes how often the AI
+  opponent botches the pass-first rule — your own teammates never do.
 
 ## Project layout
 
